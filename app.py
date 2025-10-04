@@ -148,6 +148,8 @@ PLAN_CHANNEL_OPTIONS_BASE = [
 
 PLAN_EXPENSE_CLASSIFICATIONS = ["固定費", "変動費", "投資", "その他"]
 
+UPLOAD_CACHE_TTL = 24 * 60 * 60
+
 SALES_PLAN_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
     "EC標準チャネル構成": [
         {"項目": "自社サイト売上", "月次売上": 1_200_000, "チャネル": "自社サイト"},
@@ -1449,6 +1451,148 @@ def remember_last_uploaded_files(
         st.session_state["last_uploaded"] = unique_names
 
 
+def _uploaded_file_to_cache_entry(uploaded_file: Any) -> Optional[Tuple[str, str, bytes]]:
+    """Convert an uploaded file to a cache entry of (hash, name, bytes)."""
+
+    if uploaded_file is None:
+        return None
+
+    file_bytes: bytes
+    try:
+        buffer = uploaded_file.getbuffer()
+    except AttributeError:
+        file_bytes = uploaded_file.read()
+        if file_bytes is None:
+            file_bytes = b""
+        elif isinstance(file_bytes, str):
+            file_bytes = file_bytes.encode("utf-8")
+    else:
+        file_bytes = bytes(buffer)
+    finally:
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+
+    if not isinstance(file_bytes, (bytes, bytearray)):
+        file_bytes = bytes(file_bytes)
+
+    digest = hashlib.md5()
+    digest.update(file_bytes)
+    file_name = getattr(uploaded_file, "name", "") or ""
+    if file_name:
+        digest.update(file_name.encode("utf-8", "ignore"))
+
+    return digest.hexdigest(), file_name, bytes(file_bytes)
+
+
+def _build_sales_cache_payload(
+    uploaded_sales: Dict[str, List[Any]]
+) -> Tuple[Tuple[Tuple[str, Tuple[Tuple[str, str, bytes], ...]], ...], Tuple[str, ...]]:
+    """Create a deterministic payload for cached sales loading along with hashes."""
+
+    payload: List[Tuple[str, Tuple[Tuple[str, str, bytes], ...]]] = []
+    hash_list: List[str] = []
+
+    for channel in sorted(uploaded_sales.keys()):
+        files = uploaded_sales.get(channel) or []
+        entries: List[Tuple[str, str, bytes]] = []
+        for uploaded_file in files:
+            entry = _uploaded_file_to_cache_entry(uploaded_file)
+            if entry is None:
+                continue
+            file_hash, file_name, file_bytes = entry
+            entries.append((file_hash, file_name, file_bytes))
+            hash_list.append(file_hash)
+        if entries:
+            payload.append((channel, tuple(entries)))
+
+    return tuple(payload), tuple(sorted(dict.fromkeys(hash_list)))
+
+
+def _build_single_upload_payload(uploaded_file: Any) -> Tuple[Optional[Tuple[str, str, bytes]], Optional[str]]:
+    """Create a cache payload for a single uploaded file."""
+
+    entry = _uploaded_file_to_cache_entry(uploaded_file)
+    if entry is None:
+        return None, None
+    return (entry[0], entry[1], entry[2]), entry[0]
+
+
+@st.cache_data(ttl=UPLOAD_CACHE_TTL)
+def _load_sales_files_cached(
+    payload: Tuple[Tuple[str, Tuple[Tuple[str, str, bytes], ...]], ...]
+) -> Tuple[pd.DataFrame, ValidationReport]:
+    """Cached wrapper around load_sales_files using byte payloads."""
+
+    if not payload:
+        return load_sales_files({})
+
+    reconstructed: Dict[str, List[io.BytesIO]] = {}
+    for channel, entries in payload:
+        reconstructed[channel] = []
+        for _, file_name, file_bytes in entries:
+            buffer = io.BytesIO(file_bytes)
+            buffer.name = file_name  # type: ignore[attr-defined]
+            reconstructed[channel].append(buffer)
+
+    return load_sales_files(reconstructed)
+
+
+@st.cache_data(ttl=UPLOAD_CACHE_TTL)
+def _load_cost_workbook_cached(payload: Tuple[str, str, bytes]) -> pd.DataFrame:
+    """Cached wrapper around load_cost_workbook."""
+
+    _, file_name, file_bytes = payload
+    buffer = io.BytesIO(file_bytes)
+    buffer.name = file_name  # type: ignore[attr-defined]
+    return load_cost_workbook(buffer)
+
+
+@st.cache_data(ttl=UPLOAD_CACHE_TTL)
+def _load_subscription_workbook_cached(payload: Tuple[str, str, bytes]) -> pd.DataFrame:
+    """Cached wrapper around load_subscription_workbook."""
+
+    _, file_name, file_bytes = payload
+    buffer = io.BytesIO(file_bytes)
+    buffer.name = file_name  # type: ignore[attr-defined]
+    return load_subscription_workbook(buffer)
+
+
+def clear_uploaded_data_caches() -> None:
+    """Clear cached data derived from uploaded files and reset related markers."""
+
+    _load_sales_files_cached.clear()
+    _load_cost_workbook_cached.clear()
+    _load_subscription_workbook_cached.clear()
+    st.session_state.pop("uploaded_sales_hashes", None)
+    st.session_state.pop("uploaded_cost_hash", None)
+    st.session_state.pop("uploaded_subscription_hash", None)
+
+
+def _update_upload_cache_state(
+    sales_hashes: Tuple[str, ...],
+    cost_hash: Optional[str],
+    subscription_hash: Optional[str],
+) -> None:
+    """Track current upload hashes and clear caches when uploads are removed."""
+
+    previous_sales = tuple(st.session_state.get("uploaded_sales_hashes", ()))
+    previous_cost = st.session_state.get("uploaded_cost_hash")
+    previous_subscription = st.session_state.get("uploaded_subscription_hash")
+
+    if not sales_hashes and previous_sales:
+        _load_sales_files_cached.clear()
+    if cost_hash is None and previous_cost is not None:
+        _load_cost_workbook_cached.clear()
+    if subscription_hash is None and previous_subscription is not None:
+        _load_subscription_workbook_cached.clear()
+
+    st.session_state["uploaded_sales_hashes"] = sales_hashes
+    st.session_state["uploaded_cost_hash"] = cost_hash
+    st.session_state["uploaded_subscription_hash"] = subscription_hash
+
+
 @st.cache_data(ttl=24 * 60 * 60)
 def load_sample_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """サンプルデータをキャッシュして高速に提供する。"""
@@ -1754,15 +1898,22 @@ def load_data(
         cost_frames.append(sample_cost)
         subscription_frames.append(sample_subscription)
 
-    loaded_sales, uploaded_validation = load_sales_files(uploaded_sales)
+    sales_payload, sales_hashes = _build_sales_cache_payload(uploaded_sales)
+    if sales_payload:
+        loaded_sales, uploaded_validation = _load_sales_files_cached(sales_payload)
+    else:
+        loaded_sales, uploaded_validation = pd.DataFrame(), ValidationReport()
     validation_report.extend(uploaded_validation)
     if not loaded_sales.empty:
         sales_frames.append(loaded_sales)
 
-    if cost_file:
-        cost_frames.append(load_cost_workbook(cost_file))
-    if subscription_file:
-        subscription_frames.append(load_subscription_workbook(subscription_file))
+    cost_payload, cost_hash = _build_single_upload_payload(cost_file)
+    if cost_payload is not None:
+        cost_frames.append(_load_cost_workbook_cached(cost_payload))
+    subscription_payload, subscription_hash = _build_single_upload_payload(subscription_file)
+    if subscription_payload is not None:
+        subscription_frames.append(_load_subscription_workbook_cached(subscription_payload))
+    _update_upload_cache_state(sales_hashes, cost_hash, subscription_hash)
 
     if automated_sales:
         for df in automated_sales.values():
@@ -3172,6 +3323,7 @@ def render_business_plan_wizard(actual_sales: Optional[pd.DataFrame]) -> None:
     with header_cols[1]:
         if st.button("リセット", key="plan_reset_button"):
             reset_plan_wizard_state()
+            clear_uploaded_data_caches()
             trigger_rerun()
 
     step_index = int(state.get("current_step", 0))
@@ -7346,6 +7498,7 @@ def main() -> None:
     if st.sidebar.button("設定をリセット", key="reset_filter_button"):
         reset_filters(default_filters)
     if st.sidebar.button("セッション状態を初期化", key="clear_session_button"):
+        clear_uploaded_data_caches()
         st.session_state.clear()
         trigger_rerun()
 
