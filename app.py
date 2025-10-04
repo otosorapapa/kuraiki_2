@@ -639,6 +639,14 @@ KGI_TARGETS = {
 }
 
 
+BSC_TARGETS = {
+    "ltv": 60_000,
+    "repeat_rate": 0.45,
+    "inventory_turnover_days": 45,
+    "training_sessions": 6,
+}
+
+
 def apply_chart_theme(fig):
     """デザイン・トークンに基づいたPlotly共通スタイルを適用する。"""
 
@@ -953,6 +961,53 @@ def inject_mckinsey_style(
             border: 1px solid var(--border-subtle-color);
             box-shadow: var(--shadow-md);
             margin-bottom: var(--spacing-lg);
+        }}
+        .bsc-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: var(--spacing-md);
+            margin: var(--spacing-md) 0;
+        }}
+        .bsc-card {{
+            background: var(--surface-color);
+            border-radius: var(--radius-card);
+            border: 1px solid var(--border-subtle-color);
+            padding: 1.25rem 1.5rem;
+            box-shadow: var(--shadow-sm);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }}
+        .bsc-card--success {{
+            border-color: var(--success-color);
+            box-shadow: 0 0 0 1px var(--success-color), var(--shadow-md);
+            background: var(--success-surface);
+        }}
+        .bsc-card--warning {{
+            border-color: var(--warning-color);
+            box-shadow: 0 0 0 1px var(--warning-color), var(--shadow-md);
+            background: var(--warning-surface);
+        }}
+        .bsc-card__title {{
+            font-size: calc(1.05rem * var(--font-scale));
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+        }}
+        .bsc-card__subtitle {{
+            color: var(--muted-text-color);
+            font-size: calc(0.85rem * var(--font-scale));
+            margin-bottom: 0.75rem;
+        }}
+        .bsc-card .stMetric {{
+            padding: 0.5rem 0;
+        }}
+        .bsc-card .stMetric label {{
+            font-size: calc(0.9rem * var(--font-scale));
+        }}
+        .bsc-card .stMetric div[data-testid="stMetricValue"] {{
+            font-family: var(--numeric-font-family);
+            font-size: calc(1.25rem * var(--font-scale));
+        }}
+        .bsc-card .stMetric div[data-testid="stMetricDeltaValue"] {{
+            font-size: calc(0.85rem * var(--font-scale));
         }}
         .chart-section__header {{
             display: flex;
@@ -3566,11 +3621,22 @@ def format_delta(
 
 
 def render_bsc_card(
-    *, title: str, icon: str, subtitle: Optional[str], metrics: List[Dict[str, Optional[str]]]
+    *,
+    title: str,
+    icon: str,
+    subtitle: Optional[str],
+    metrics: List[Dict[str, Any]],
+    variant: str = "neutral",
 ) -> None:
     """バランスト・スコアカードのカードUIを描画する。"""
 
-    st.markdown("<div class='bsc-card'>", unsafe_allow_html=True)
+    card_classes = ["bsc-card"]
+    if variant and variant != "neutral":
+        card_classes.append(f"bsc-card--{variant}")
+    st.markdown(
+        f"<div class='{' '.join(card_classes)}'>",
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f"<div class='bsc-card__title'>{icon} {html.escape(title)}</div>", unsafe_allow_html=True
     )
@@ -3581,7 +3647,285 @@ def render_bsc_card(
         )
     for metric in metrics:
         st.metric(metric["label"], metric["value"], delta=metric.get("delta"))
+        target_text = metric.get("target_text")
+        if target_text:
+            st.caption(target_text)
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def build_bsc_quadrants(selected_kpi_row: pd.Series) -> List[Dict[str, Any]]:
+    """KPIサマリーからBSC四象限のデータ構造を生成する。"""
+
+    if selected_kpi_row is None or selected_kpi_row.empty:
+        return []
+
+    configs: List[Dict[str, Any]] = [
+        {
+            "key": "financial",
+            "title": "財務",
+            "title_icon": "💹",
+            "subtitle": "長期的な収益性を測る指標",
+            "metric_key": "ltv",
+            "metric_label": "LTV",
+            "formatter": lambda v: format_currency(v),
+            "delta_key": "ltv_delta",
+            "delta_formatter": lambda v: format_delta(v, digits=0, unit=" 円"),
+            "direction": "above",
+            "icons": {"success": "🌟", "warning": "🎯", "neutral": "•"},
+            "target_text": lambda target: f"目標: {target:,.0f} 円以上"
+            if target is not None
+            else None,
+        },
+        {
+            "key": "customer",
+            "title": "顧客",
+            "title_icon": "🤝",
+            "subtitle": "リピート構造とロイヤルティ",
+            "metric_key": "repeat_rate",
+            "metric_label": "リピート率",
+            "formatter": lambda v: format_percent(v, digits=1),
+            "delta_key": "repeat_delta",
+            "delta_formatter": lambda v: format_delta(v, digits=1, percentage=True),
+            "direction": "above",
+            "icons": {"success": "✨", "warning": "🚧", "neutral": "•"},
+            "target_text": lambda target: f"目標: {target * 100:.1f}%以上"
+            if target is not None
+            else None,
+        },
+        {
+            "key": "internal",
+            "title": "内部プロセス",
+            "title_icon": "🛠",
+            "subtitle": "在庫運用と業務効率",
+            "metric_key": "inventory_turnover_days",
+            "metric_label": "在庫回転日数",
+            "formatter": lambda v: format_number(v, digits=1, unit=" 日"),
+            "delta_key": "inventory_turnover_delta",
+            "delta_formatter": lambda v: format_delta(v, digits=1, unit=" 日"),
+            "direction": "below",
+            "icons": {"success": "✅", "warning": "⚠️", "neutral": "•"},
+            "target_text": lambda target: f"目標: {target:.0f} 日以内"
+            if target is not None
+            else None,
+        },
+        {
+            "key": "learning",
+            "title": "学習と成長",
+            "title_icon": "🎓",
+            "subtitle": "人材育成と改善サイクル",
+            "metric_key": "training_sessions",
+            "metric_label": "研修実施回数",
+            "formatter": lambda v: format_number(v, digits=0, unit=" 回"),
+            "delta_key": "training_delta",
+            "delta_formatter": lambda v: format_delta(v, digits=0, unit=" 回"),
+            "direction": "above",
+            "icons": {"success": "📈", "warning": "💡", "neutral": "•"},
+            "target_text": lambda target: f"目標: {target:.0f} 回以上"
+            if target is not None
+            else None,
+        },
+    ]
+
+    quadrants: List[Dict[str, Any]] = []
+    for config in configs:
+        metric_key = config["metric_key"]
+        delta_key = config["delta_key"]
+        raw_value = selected_kpi_row.get(metric_key)
+        delta_value = selected_kpi_row.get(delta_key)
+        if pd.isna(raw_value):
+            raw_value = None
+        if pd.isna(delta_value):
+            delta_value = None
+
+        formatter: Callable[[Optional[float]], str] = config["formatter"]
+        formatted_value = formatter(raw_value)
+        delta_formatter: Callable[[Optional[float]], Optional[str]] = config["delta_formatter"]
+        delta_text = delta_formatter(delta_value) if delta_value is not None else None
+
+        target_value = BSC_TARGETS.get(metric_key)
+        target_formatter: Callable[[Optional[float]], Optional[str]] = config["target_text"]
+        target_text = target_formatter(target_value)
+
+        icons = config["icons"]
+        direction = config.get("direction", "above")
+        variant = "neutral"
+        status_icon = icons.get("neutral", "")
+        if raw_value is not None and target_value is not None:
+            if direction == "below":
+                meets_target = float(raw_value) <= float(target_value)
+            else:
+                meets_target = float(raw_value) >= float(target_value)
+            variant = "success" if meets_target else "warning"
+            status_icon = icons["success"] if meets_target else icons["warning"]
+
+        label_prefix = f"{status_icon} " if status_icon else ""
+        metric_entry = {
+            "label": f"{label_prefix}{config['metric_label']}",
+            "value": formatted_value,
+            "delta": delta_text,
+            "target_text": target_text,
+            "raw_value": raw_value,
+            "target_value": target_value,
+            "delta_value": delta_value,
+        }
+
+        quadrants.append(
+            {
+                "key": config["key"],
+                "title": config["title"],
+                "icon": config["title_icon"],
+                "subtitle": config.get("subtitle"),
+                "metrics": [metric_entry],
+                "variant": variant,
+                "metric_label": config["metric_label"],
+            }
+        )
+
+    has_values = any(
+        metric.get("raw_value") is not None
+        for quadrant in quadrants
+        for metric in quadrant.get("metrics", [])
+    )
+    return quadrants if has_values else []
+
+
+def render_bsc_cards_grid(quadrants: Sequence[Dict[str, Any]]) -> None:
+    """BSCカード群を2x2レイアウトで表示する。"""
+
+    if not quadrants:
+        st.info("BSCを表示するための指標が不足しています。")
+        return
+
+    columns_per_row = 2
+    for row_start in range(0, len(quadrants), columns_per_row):
+        row_quadrants = quadrants[row_start : row_start + columns_per_row]
+        cols = st.columns(len(row_quadrants))
+        for col, quadrant in zip(cols, row_quadrants):
+            with col:
+                render_bsc_card(
+                    title=quadrant.get("title", ""),
+                    icon=quadrant.get("icon", ""),
+                    subtitle=quadrant.get("subtitle"),
+                    metrics=quadrant.get("metrics", []),
+                    variant=quadrant.get("variant", "neutral"),
+                )
+
+
+def render_bsc_quadrant_chart(quadrants: Sequence[Dict[str, Any]]) -> None:
+    """BSC四象限をPlotlyチャートとして描画する。"""
+
+    if not quadrants:
+        st.info("BSCを表示するための指標が不足しています。")
+        return
+
+    ensure_theme_state_defaults()
+    tokens = st.session_state.get("ui_active_tokens", LIGHT_THEME_TOKENS)
+
+    variant_color_map = {
+        "success": SUCCESS_COLOR,
+        "warning": WARNING_COLOR,
+        "neutral": ACCENT_COLOR,
+    }
+    variant_surface_map = {
+        "success": SUCCESS_SURFACE_COLOR,
+        "warning": WARNING_SURFACE_COLOR,
+        "neutral": tokens.get("surface_tint", tokens.get("surface", "#ffffff")),
+    }
+
+    quadrant_bounds = {
+        "financial": (0.0, 1.0, 1.0, 2.0),
+        "customer": (1.0, 2.0, 1.0, 2.0),
+        "internal": (0.0, 1.0, 0.0, 1.0),
+        "learning": (1.0, 2.0, 0.0, 1.0),
+    }
+
+    fig = go.Figure()
+
+    for quadrant in quadrants:
+        key = quadrant.get("key")
+        bounds = quadrant_bounds.get(key)
+        if not bounds:
+            continue
+        x0, x1, y0, y1 = bounds
+        variant = quadrant.get("variant", "neutral")
+        border_color = variant_color_map.get(variant, ACCENT_COLOR)
+        fill_color = variant_surface_map.get(variant, tokens.get("surface_tint"))
+
+        fig.add_shape(
+            type="rect",
+            x0=x0,
+            x1=x1,
+            y0=y0,
+            y1=y1,
+            line=dict(color=border_color, width=2),
+            fillcolor=fill_color,
+            layer="below",
+        )
+
+        center_x = (x0 + x1) / 2
+        center_y = (y0 + y1) / 2
+        title_y = y1 - 0.18
+        value_y = center_y + 0.15
+        target_y = center_y - 0.2
+
+        metric_info = quadrant.get("metrics", [{}])[0]
+        value_text = metric_info.get("value", "-")
+        target_text = metric_info.get("target_text")
+        delta_text = metric_info.get("delta")
+
+        fig.add_annotation(
+            x=center_x,
+            y=title_y,
+            text=f"{quadrant.get('icon', '')} {quadrant.get('title', '')}",
+            showarrow=False,
+            font=dict(size=16, color=tokens.get("text"), family=MCKINSEY_FONT_STACK),
+        )
+        fig.add_annotation(
+            x=center_x,
+            y=value_y,
+            text=value_text,
+            showarrow=False,
+            font=dict(size=18, color=tokens.get("text"), family=NUMERIC_FONT_STACK),
+        )
+        if target_text:
+            fig.add_annotation(
+                x=center_x,
+                y=target_y,
+                text=target_text,
+                showarrow=False,
+                font=dict(size=12, color=tokens.get("muted"), family=MCKINSEY_FONT_STACK),
+            )
+
+        hover_lines = [
+            f"{quadrant.get('title', '')} ({quadrant.get('metric_label', '')})",
+            f"実績: {value_text}",
+        ]
+        if delta_text:
+            hover_lines.append(f"前期差: {delta_text}")
+        if target_text:
+            hover_lines.append(target_text)
+
+        fig.add_trace(
+            go.Scatter(
+                x=[center_x],
+                y=[center_y],
+                mode="markers",
+                marker=dict(size=20, opacity=0),
+                showlegend=False,
+                hovertemplate="<br>".join(hover_lines) + "<extra></extra>",
+            )
+        )
+
+    apply_chart_theme(fig)
+    fig.update_layout(
+        xaxis=dict(range=[0, 2], showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(range=[0, 2], showgrid=False, zeroline=False, showticklabels=False),
+        height=480,
+        margin=dict(l=40, r=40, t=40, b=40),
+        hovermode="closest",
+    )
+
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
 def persistent_segmented_control(
@@ -7559,6 +7903,23 @@ def main() -> None:
             st.caption(f"対象期間: {period_start} 〜 {period_end}")
 
             kpi_metrics = render_first_level_kpi_strip(kpi_period_summary, selected_kpi_row)
+            bsc_quadrants = build_bsc_quadrants(selected_kpi_row)
+            if bsc_quadrants:
+                st.markdown("### バランスト・スコアカード")
+                bsc_view_mode = persistent_segmented_control(
+                    "bsc_view_mode",
+                    ["カード", "チャート"],
+                    default="カード",
+                    help_text="カード表示と四象限チャートを切り替えます。",
+                    label="BSC表示切替",
+                    label_visibility="collapsed",
+                )
+                if bsc_view_mode == "カード":
+                    render_bsc_cards_grid(bsc_quadrants)
+                else:
+                    render_bsc_quadrant_chart(bsc_quadrants)
+                st.caption("ターゲットを達成した象限はハイライト表示されます。")
+
             render_active_kpi_details(kpi_period_summary, kpi_metrics)
 
             primary_tab_entries = [
