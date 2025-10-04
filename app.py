@@ -21,6 +21,7 @@ import altair as alt
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit_plotly_events import plotly_events
 
 
@@ -112,6 +113,105 @@ def trigger_rerun() -> None:
         raise RuntimeError("Streamlit rerun function is unavailable.")
     rerun_callable()
 
+
+HOTKEY_ACTION_STATE = "hotkey_action"
+HOTKEY_REFRESH_RESULTS = "refresh_results"
+HOTKEY_REFETCH_DATA = "refetch_data"
+
+
+def _queue_hotkey_action(action: str) -> None:
+    """Store a hotkey action request with a timestamp for later processing."""
+
+    st.session_state[HOTKEY_ACTION_STATE] = {
+        "action": action,
+        "timestamp": datetime.utcnow().timestamp(),
+    }
+
+
+def _parse_api_params(params_raw: Optional[str]) -> Optional[Dict[str, str]]:
+    """Convert a query-string style parameter value into a dictionary."""
+
+    if not params_raw:
+        return None
+    parsed_pairs = parse_qsl(params_raw, keep_blank_values=False)
+    if not parsed_pairs:
+        return None
+    return {key: value for key, value in parsed_pairs}
+
+
+def refresh_configured_automations(channel_files: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch latest sales data for channels with configured API endpoints."""
+
+    feedback: Dict[str, Any] = {
+        "success": [],
+        "warnings": [],
+        "errors": [],
+        "info": None,
+    }
+
+    if not channel_files:
+        feedback["info"] = "売上データのチャネルがまだ設定されていません。"
+        return feedback
+
+    configured_channels = [
+        channel for channel in channel_files.keys() if st.session_state.get(f"api_endpoint_{channel}")
+    ]
+    if not configured_channels:
+        feedback["info"] = "APIエンドポイントが設定されていません。サイドバーで接続先を登録してください。"
+        return feedback
+
+    for channel in configured_channels:
+        endpoint = st.session_state.get(f"api_endpoint_{channel}")
+        token = st.session_state.get(f"api_token_{channel}") or None
+        params_raw = st.session_state.get(f"api_params_{channel}")
+        params_dict = _parse_api_params(params_raw)
+
+        try:
+            with st.spinner(f"{channel}のデータを再取得中..."):
+                fetched_df, fetch_report = fetch_sales_from_endpoint(
+                    endpoint,
+                    token=token,
+                    params=params_dict,
+                    channel_hint=channel,
+                )
+        except Exception as exc:  # pragma: no cover - safeguards remote failures
+            logger.exception("Quick action refresh failed for %s", channel)
+            feedback["errors"].append(f"{channel}: APIリクエストでエラーが発生しました ({exc}).")
+            continue
+
+        st.session_state.setdefault("api_sales_data", {})[channel] = fetched_df
+        st.session_state.setdefault("api_sales_validation", {})[channel] = fetch_report
+        st.session_state.setdefault("api_last_fetched", {})[channel] = datetime.now()
+
+        error_messages = [
+            msg.message
+            for msg in getattr(fetch_report, "messages", [])
+            if getattr(msg, "level", "").lower() == "error"
+        ]
+        warning_messages = [
+            msg.message
+            for msg in getattr(fetch_report, "messages", [])
+            if getattr(msg, "level", "").lower() == "warning"
+        ]
+
+        if error_messages:
+            feedback["errors"].append(
+                f"{channel}: " + " / ".join(error_messages[:3])
+                + (" ..." if len(error_messages) > 3 else "")
+            )
+            continue
+
+        feedback["success"].append(channel)
+        if warning_messages:
+            feedback["warnings"].append(
+                f"{channel}: " + " / ".join(warning_messages[:3])
+                + (" ..." if len(warning_messages) > 3 else "")
+            )
+
+    if not any((feedback["success"], feedback["warnings"], feedback["errors"])):
+        feedback["info"] = "再取得の対象となるチャネルが見つかりませんでした。"
+
+    return feedback
 
 PERIOD_FREQ_OPTIONS: List[Tuple[str, str]] = [
     ("月次", "M"),
@@ -8040,6 +8140,8 @@ def main() -> None:
     init_phase2_session_state()
     ensure_theme_state_defaults()
 
+    st.session_state.setdefault("hotkey_last_processed", None)
+
     if st.session_state.pop("pending_enable_sample_data", False):
         set_state_and_widget("use_sample_data", True)
 
@@ -8219,11 +8321,7 @@ def main() -> None:
                 help="日付範囲などの条件が必要な場合に指定します。",
             )
 
-            params_dict: Optional[Dict[str, str]] = None
-            if params_raw:
-                parsed_pairs = parse_qsl(params_raw, keep_blank_values=False)
-                if parsed_pairs:
-                    params_dict = {k: v for k, v in parsed_pairs}
+            params_dict = _parse_api_params(params_raw)
 
             fetch_now = st.button(f"{channel}の最新データを取得", key=f"fetch_api_{channel}")
             if fetch_now:
@@ -8757,6 +8855,127 @@ def main() -> None:
         st.markdown("<div class='surface-card main-nav-block'>", unsafe_allow_html=True)
         selected_nav_key, selected_nav_label = render_navigation()
         st.markdown("</div>", unsafe_allow_html=True)
+
+    quick_action_feedback = st.session_state.pop("quick_action_feedback", None)
+
+    with st.container():
+        st.markdown("<div class='surface-card quick-actions-block'>", unsafe_allow_html=True)
+        action_cols = st.columns(2)
+        action_cols[0].button(
+            "結果を更新する",
+            key="quick_action_refresh_results",
+            use_container_width=True,
+            type="primary",
+            on_click=lambda: _queue_hotkey_action(HOTKEY_REFRESH_RESULTS),
+        )
+        action_cols[1].button(
+            "最新データを再取得",
+            key="quick_action_refetch_data",
+            use_container_width=True,
+            type="secondary",
+            on_click=lambda: _queue_hotkey_action(HOTKEY_REFETCH_DATA),
+        )
+
+        st.caption("ショートカット: Shift+Rで結果を更新 / Shift+Uで最新データを再取得")
+
+        hotkey_event = components.html(
+            f"""
+<script>
+(function() {{
+  const frameId = window.frameElement ? window.frameElement.id : null;
+  const sendPayload = (payload) => {{
+    if (!frameId) {{ return; }}
+    window.parent.postMessage({{
+      isStreamlitMessage: true,
+      type: "streamlit:setComponentValue",
+      id: frameId,
+      value: payload,
+    }}, "*");
+    window.parent.postMessage({{
+      type: "kuraiki-hotkey",
+      payload: payload,
+    }}, "*");
+  }};
+  const shouldIgnoreTarget = (target) => {{
+    if (!target) {{ return false; }}
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {{
+      return true;
+    }}
+    return target.closest && !!target.closest('[contenteditable="true"]');
+  }};
+  const resolveAction = (event) => {{
+    if (!event.shiftKey) {{ return null; }}
+    const key = event.key ? event.key.toUpperCase() : "";
+    if (key === "R") {{ return "{HOTKEY_REFRESH_RESULTS}"; }}
+    if (key === "U") {{ return "{HOTKEY_REFETCH_DATA}"; }}
+    return null;
+  }};
+  document.addEventListener('keydown', (event) => {{
+    const action = resolveAction(event);
+    if (!action) {{ return; }}
+    if (shouldIgnoreTarget(event.target)) {{ return; }}
+    event.preventDefault();
+    const payload = {{ action: action, timestamp: Date.now() }};
+    sendPayload(payload);
+  }}, {{ capture: true }});
+}})();
+</script>
+""",
+            height=0,
+            width=0,
+        )
+        if hotkey_event and isinstance(hotkey_event, dict):
+            st.session_state[HOTKEY_ACTION_STATE] = hotkey_event
+
+        if quick_action_feedback:
+            if quick_action_feedback.get("errors"):
+                st.error(
+                    "再取得でエラーが発生しました: "
+                    + " / ".join(quick_action_feedback["errors"])
+                )
+            if quick_action_feedback.get("warnings"):
+                st.warning(
+                    "警告が検出されました: "
+                    + " / ".join(quick_action_feedback["warnings"])
+                )
+            if quick_action_feedback.get("success"):
+                st.success(
+                    "最新データの再取得が完了しました: "
+                    + "、".join(quick_action_feedback["success"])
+                )
+            if (
+                quick_action_feedback.get("info")
+                and not (
+                    quick_action_feedback.get("success")
+                    or quick_action_feedback.get("warnings")
+                    or quick_action_feedback.get("errors")
+                )
+            ):
+                st.info(quick_action_feedback["info"])
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    def _handle_pending_hotkey_action() -> None:
+        payload = st.session_state.get(HOTKEY_ACTION_STATE)
+        if not isinstance(payload, dict):
+            return
+        action = payload.get("action")
+        timestamp = payload.get("timestamp")
+        if not action or timestamp is None:
+            return
+        last_processed = st.session_state.get("hotkey_last_processed")
+        if timestamp == last_processed:
+            return
+        st.session_state["hotkey_last_processed"] = timestamp
+
+        if action == HOTKEY_REFRESH_RESULTS:
+            trigger_rerun()
+        elif action == HOTKEY_REFETCH_DATA:
+            feedback = refresh_configured_automations(channel_files)
+            st.session_state["quick_action_feedback"] = feedback
+            trigger_rerun()
+
+    _handle_pending_hotkey_action()
 
     render_breadcrumb(selected_nav_label)
 
