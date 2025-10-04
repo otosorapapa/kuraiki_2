@@ -296,8 +296,15 @@ EXPENSE_IMPORT_CANDIDATES: Dict[str, List[str]] = {
 
 UPLOAD_META_MULTIPLE = "対応形式: CSV, Excel（最大10MB・複数ファイル対応）"
 UPLOAD_META_SINGLE = "対応形式: CSV, Excel（最大10MB・1ファイル）"
-UPLOAD_HELP_MULTIPLE = "CSVまたはExcelファイルをドラッグ＆ドロップで追加できます。複数ファイルをまとめてアップロードできます。"
-UPLOAD_HELP_SINGLE = "CSVまたはExcelファイルをドラッグ＆ドロップでアップロードしてください。1ファイルのみアップロードできます。"
+UPLOAD_HELP_MULTIPLE = (
+    "CSVまたはExcelファイルをドラッグ＆ドロップで追加できます。複数ファイルをまとめてアップロードできます。"
+    "同じファイル名と内容のまま再アップロードすると24時間以内はキャッシュ結果が再利用されます。"
+    "最新データを反映したい場合は内容を更新して再度アップロードしてください。"
+)
+UPLOAD_HELP_SINGLE = (
+    "CSVまたはExcelファイルをドラッグ＆ドロップでアップロードしてください。1ファイルのみアップロードできます。"
+    "同じファイル名と内容では24時間キャッシュが再利用されます。内容を更新したら再度アップロードするとキャッシュが更新されます。"
+)
 
 SALES_UPLOAD_CONFIGS: List[Dict[str, str]] = [
     {
@@ -1750,21 +1757,70 @@ def load_data(
     subscription_frames: List[pd.DataFrame] = []
     validation_report = ValidationReport()
 
+    def _prepare_uploaded_payload(uploaded: Any) -> Optional[Tuple[Optional[str], bytes]]:
+        if uploaded is None:
+            return None
+        if isinstance(uploaded, tuple) and len(uploaded) >= 2:
+            name, payload = uploaded[:2]
+            if isinstance(payload, memoryview):
+                return name, payload.tobytes()
+            if isinstance(payload, bytearray):
+                return name, bytes(payload)
+            if isinstance(payload, bytes):
+                return name, payload
+            return name, bytes(payload)
+
+        name = getattr(uploaded, "name", None)
+        buffer: Optional[Any] = None
+        if hasattr(uploaded, "getbuffer"):
+            try:
+                buffer = uploaded.getbuffer()
+            except Exception:
+                buffer = None
+        if buffer is None and hasattr(uploaded, "read"):
+            try:
+                buffer = uploaded.read()
+            except Exception:
+                buffer = None
+        if buffer is None:
+            return None
+        if isinstance(buffer, memoryview):
+            data = buffer.tobytes()
+        elif isinstance(buffer, bytearray):
+            data = bytes(buffer)
+        elif isinstance(buffer, bytes):
+            data = buffer
+        else:
+            data = bytes(buffer)
+        return name, data
+
     if use_sample:
         sample_sales, sample_cost, sample_subscription = load_sample_data()
         sales_frames.append(sample_sales)
         cost_frames.append(sample_cost)
         subscription_frames.append(sample_subscription)
 
-    loaded_sales, uploaded_validation = load_sales_files(uploaded_sales)
+    prepared_sales: Dict[str, List[Tuple[Optional[str], bytes]]] = {}
+    for channel, files in uploaded_sales.items():
+        payloads: List[Tuple[Optional[str], bytes]] = []
+        for uploaded in files or []:
+            payload = _prepare_uploaded_payload(uploaded)
+            if payload is not None:
+                payloads.append(payload)
+        if payloads:
+            prepared_sales[channel] = payloads
+
+    loaded_sales, uploaded_validation = load_sales_files(prepared_sales)
     validation_report.extend(uploaded_validation)
     if not loaded_sales.empty:
         sales_frames.append(loaded_sales)
 
-    if cost_file:
-        cost_frames.append(load_cost_workbook(cost_file))
-    if subscription_file:
-        subscription_frames.append(load_subscription_workbook(subscription_file))
+    cost_payload = _prepare_uploaded_payload(cost_file)
+    if cost_payload:
+        cost_frames.append(load_cost_workbook(cost_payload))
+    subscription_payload = _prepare_uploaded_payload(subscription_file)
+    if subscription_payload:
+        subscription_frames.append(load_subscription_workbook(subscription_payload))
 
     if automated_sales:
         for df in automated_sales.values():
