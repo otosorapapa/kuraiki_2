@@ -1816,7 +1816,7 @@ def build_alerts(
         alerts.append(f"解約率が{churn_rate:.1%}と高水準です。定期顧客のフォローを見直してください。")
 
     gross_margin_rate = kpi_summary.get("gross_margin_rate") if kpi_summary else None
-    if gross_margin_rate and gross_margin_rate < thresholds["gross_margin_rate"]:
+    if gross_margin_rate is not None and pd.notna(gross_margin_rate) and gross_margin_rate < thresholds["gross_margin_rate"]:
         alerts.append(f"粗利率が{gross_margin_rate:.1%}と目標を下回っています。商品ミックスを確認しましょう。")
 
     if cashflow_forecast is not None and not cashflow_forecast.empty:
