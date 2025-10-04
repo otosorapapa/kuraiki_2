@@ -6159,9 +6159,82 @@ def build_industry_benchmark_table(kpi: Dict[str, Optional[float]]) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+def _generate_adjustment_mesh(adjust_pct_map: Dict[str, float]) -> Tuple[List[str], np.ndarray]:
+    """調整幅を元にした%-表現の組み合わせを生成する。"""
+
+    keys = list(adjust_pct_map.keys())
+    if not keys:
+        return keys, np.zeros((1, 0))
+
+    factors: List[np.ndarray] = []
+    for key in keys:
+        width = max(0.0, float(adjust_pct_map.get(key, 0.0))) / 100.0
+        if width == 0.0:
+            factors.append(np.array([0.0]))
+        else:
+            factors.append(np.array([-width, 0.0, width], dtype=float))
+
+    mesh = np.array(np.meshgrid(*factors, indexing="ij"))
+    mesh = mesh.reshape(len(keys), -1).T if mesh.size else np.zeros((1, len(keys)))
+    return keys, mesh
+
+
+def _build_profit_range_cases(
+    scenario_name: str,
+    annual_sales: float,
+    margin: float,
+    monthly_fixed_cost: float,
+    horizon: int,
+    adjust_pct_map: Dict[str, float],
+) -> pd.DataFrame:
+    """単価・数量・固定費を揺らした場合の利益レンジを計算する。"""
+
+    keys, mesh = _generate_adjustment_mesh(adjust_pct_map)
+    if mesh.size == 0:
+        mesh = np.zeros((1, len(keys)))
+
+    label_map = {
+        "unit_price": "単価",
+        "quantity": "数量",
+        "fixed_cost": "固定費",
+    }
+
+    rows: List[Dict[str, Any]] = []
+    annual_fixed_cost = monthly_fixed_cost * max(1, horizon)
+    for combo in mesh:
+        multipliers = {key: 1.0 + delta for key, delta in zip(keys, combo)}
+        adjusted_sales = annual_sales * multipliers.get("unit_price", 1.0) * multipliers.get("quantity", 1.0)
+        adjusted_fixed_cost = annual_fixed_cost * multipliers.get("fixed_cost", 1.0)
+        adjusted_profit = (adjusted_sales * margin) - adjusted_fixed_cost
+        label_parts = []
+        for key, delta in zip(keys, combo):
+            label = label_map.get(key, key)
+            label_parts.append(f"{label} {delta * 100:+.1f}%")
+        adjustment_label = " / ".join(label_parts) if label_parts else "基準"
+        rows.append(
+            {
+                "scenario": scenario_name,
+                "unit_price_pct": multipliers.get("unit_price", 1.0) - 1.0,
+                "quantity_pct": multipliers.get("quantity", 1.0) - 1.0,
+                "fixed_cost_pct": multipliers.get("fixed_cost", 1.0) - 1.0,
+                "sales": adjusted_sales,
+                "profit": adjusted_profit,
+                "adjustment_label": adjustment_label,
+            }
+        )
+
+    range_df = pd.DataFrame(rows)
+    if not range_df.empty:
+        range_df["unit_price_pct"] = range_df["unit_price_pct"] * 100.0
+        range_df["quantity_pct"] = range_df["quantity_pct"] * 100.0
+        range_df["fixed_cost_pct"] = range_df["fixed_cost_pct"] * 100.0
+
+    return range_df
+
+
 def run_scenario_projection(
     monthly_sales: pd.Series, scenario: Dict[str, Any]
-) -> Tuple[str, pd.DataFrame, Dict[str, Any], pd.DataFrame]:
+) -> Tuple[str, pd.DataFrame, Dict[str, Any], pd.DataFrame, pd.DataFrame]:
     """シナリオ設定に基づき将来12〜36ヶ月の推移を試算する。"""
 
     scenario_name = scenario.get("name") or "新規シナリオ"
@@ -6171,6 +6244,11 @@ def run_scenario_projection(
     horizon = int(scenario.get("horizon", 12) or 12)
     if horizon <= 0:
         horizon = 12
+
+    monthly_fixed_cost = float(scenario.get("base_fixed_cost", DEFAULT_FIXED_COST))
+    unit_price_adjust_pct = float(scenario.get("unit_price_adjust_pct", 10.0))
+    quantity_adjust_pct = float(scenario.get("quantity_adjust_pct", 10.0))
+    fixed_cost_adjust_pct = float(scenario.get("fixed_cost_adjust_pct", 10.0))
 
     base_series = monthly_sales.copy() if monthly_sales is not None else pd.Series(dtype=float)
     if base_series.empty:
@@ -6197,7 +6275,7 @@ def run_scenario_projection(
     rows: List[Dict[str, Any]] = []
     for idx, (base_value, period) in enumerate(zip(base_array, projection_periods), start=1):
         projected_sales = base_value * ((1 + growth) ** idx)
-        projected_profit = projected_sales * margin
+        projected_profit = (projected_sales * margin) - monthly_fixed_cost
         cumulative_cash += projected_profit
         rows.append(
             {
@@ -6225,6 +6303,7 @@ def run_scenario_projection(
         "期末キャッシュ": float(projection_df["cash"].iloc[-1]) if not projection_df.empty else funding,
         "成長率(%)": growth * 100,
         "利益率(%)": margin * 100,
+        "調整固定費(月額)": monthly_fixed_cost,
         "調達額": funding,
     }
 
@@ -6234,19 +6313,34 @@ def run_scenario_projection(
         {
             "scenario": scenario_name,
             "margin": point,
-            "annual_profit": annual_sales * (point / 100.0),
+            "annual_profit": annual_sales * (point / 100.0) - (monthly_fixed_cost * horizon),
         }
         for point in margin_points
     ]
     sensitivity_df = pd.DataFrame(sensitivity_rows)
 
-    return scenario_name, projection_df, summary_row, sensitivity_df
+    adjust_pct_map = {
+        "unit_price": unit_price_adjust_pct,
+        "quantity": quantity_adjust_pct,
+        "fixed_cost": fixed_cost_adjust_pct,
+    }
+    profit_range_df = _build_profit_range_cases(
+        scenario_name,
+        annual_sales,
+        margin,
+        monthly_fixed_cost,
+        horizon,
+        adjust_pct_map,
+    )
+
+    return scenario_name, projection_df, summary_row, sensitivity_df, profit_range_df
 
 
 def generate_phase2_report(
     summary_df: Optional[pd.DataFrame],
     swot: Optional[Dict[str, List[str]]],
     benchmark_df: Optional[pd.DataFrame],
+    profit_range_summary: Optional[pd.DataFrame] = None,
 ) -> str:
     """シナリオ比較のサマリーを含むテキストレポートを生成する。"""
 
@@ -6263,6 +6357,18 @@ def generate_phase2_report(
                     sales=row.get("年間売上", 0.0),
                     profit=row.get("年間利益", 0.0),
                     cash=row.get("期末キャッシュ", 0.0),
+                )
+            )
+
+    if profit_range_summary is not None and not profit_range_summary.empty:
+        buffer.write("\n[単価・数量・固定費の利益レンジ]\n")
+        for _, row in profit_range_summary.iterrows():
+            buffer.write(
+                "- {scenario}: 最小利益 {min_profit:,.0f} 円 / 最大利益 {max_profit:,.0f} 円 / 利益幅 {range_width:,.0f} 円\n".format(
+                    scenario=row.get("scenario", "-"),
+                    min_profit=row.get("最小利益", 0.0),
+                    max_profit=row.get("最大利益", 0.0),
+                    range_width=row.get("利益幅", 0.0),
                 )
             )
 
@@ -6341,6 +6447,19 @@ def render_scenario_analysis_section(
             base_df["order_month"] = pd.PeriodIndex(pd.to_datetime(base_df["order_date"]), freq="M")
         monthly_sales = base_df.groupby("order_month")["sales_amount"].sum().sort_index()
 
+    base_sales_total = float(base_df["sales_amount"].sum()) if isinstance(base_df, pd.DataFrame) and "sales_amount" in base_df.columns else 0.0
+    base_quantity_total = 0.0
+    if isinstance(base_df, pd.DataFrame) and "quantity" in base_df.columns:
+        base_quantity_total = float(pd.to_numeric(base_df["quantity"], errors="coerce").fillna(0.0).sum())
+    base_unit_price = 0.0
+    if base_quantity_total > 0:
+        base_unit_price = base_sales_total / base_quantity_total
+    elif isinstance(base_df, pd.DataFrame) and not base_df.empty:
+        base_unit_price = float(base_df["sales_amount"].mean()) if "sales_amount" in base_df.columns else 0.0
+    st.session_state["scenario_base_sales_total"] = base_sales_total
+    st.session_state["scenario_base_quantity_total"] = base_quantity_total
+    st.session_state["scenario_base_unit_price"] = base_unit_price
+
     with tabs[0]:
         st.header("入力データ")
         uploaded_file = st.file_uploader(
@@ -6379,7 +6498,15 @@ def render_scenario_analysis_section(
         else:
             st.info("シナリオ用のデータをアップロードするか、既存データを読み込んでください。")
 
-        scenarios = st.session_state.get("scenario_inputs", [])
+        scenarios = st.session_state.setdefault("scenario_inputs", [])
+        form_defaults = st.session_state.setdefault(
+            "scenario_form_defaults",
+            {
+                "unit_price_adjust_pct": 10.0,
+                "quantity_adjust_pct": 10.0,
+                "fixed_cost_adjust_pct": 10.0,
+            },
+        )
         with st.form("scenario_entry_form", clear_on_submit=True):
             st.subheader("シナリオパラメータ")
             default_name = f"シナリオ {len(scenarios) + 1}"
@@ -6388,8 +6515,40 @@ def render_scenario_analysis_section(
             margin = st.number_input("営業利益率 (%)", min_value=0.0, max_value=100.0, value=12.0, step=0.5)
             funding = st.number_input("資金調達額 (円)", min_value=0.0, value=0.0, step=100_000.0, format="%.0f")
             horizon = st.slider("分析期間 (ヶ月)", min_value=3, max_value=36, value=12)
+            unit_price_adjust_pct = st.number_input(
+                "単価調整幅 (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(form_defaults.get("unit_price_adjust_pct", 10.0)),
+                step=0.5,
+                help="基準単価に対して感度分析で揺らす範囲を指定します。",
+            )
+            quantity_adjust_pct = st.number_input(
+                "数量調整幅 (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(form_defaults.get("quantity_adjust_pct", 10.0)),
+                step=0.5,
+                help="基準数量に対して感度分析で揺らす範囲を指定します。",
+            )
+            fixed_cost_adjust_pct = st.number_input(
+                "固定費調整幅 (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(form_defaults.get("fixed_cost_adjust_pct", 10.0)),
+                step=0.5,
+                help="基準固定費に対する増減幅です。",
+            )
             submitted = st.form_submit_button("シナリオを追加")
             if submitted:
+                form_defaults.update(
+                    {
+                        "unit_price_adjust_pct": float(unit_price_adjust_pct),
+                        "quantity_adjust_pct": float(quantity_adjust_pct),
+                        "fixed_cost_adjust_pct": float(fixed_cost_adjust_pct),
+                    }
+                )
+                st.session_state["scenario_form_defaults"] = form_defaults
                 scenarios.append(
                     {
                         "name": scenario_name,
@@ -6397,6 +6556,13 @@ def render_scenario_analysis_section(
                         "margin": margin,
                         "funding": funding,
                         "horizon": horizon,
+                        "unit_price_adjust_pct": float(unit_price_adjust_pct),
+                        "quantity_adjust_pct": float(quantity_adjust_pct),
+                        "fixed_cost_adjust_pct": float(fixed_cost_adjust_pct),
+                        "base_sales_total": base_sales_total,
+                        "base_quantity_total": base_quantity_total,
+                        "base_unit_price": base_unit_price,
+                        "base_fixed_cost": float(st.session_state.get("sidebar_fixed_cost", DEFAULT_FIXED_COST)),
                     }
                 )
                 st.session_state["scenario_inputs"] = scenarios
@@ -6407,8 +6573,9 @@ def render_scenario_analysis_section(
             for idx, scenario in enumerate(list(scenarios)):
                 info_col, remove_col = st.columns([5, 1])
                 info_col.markdown(
-                    f"**{scenario['name']}** — 成長率 {scenario['growth']:.1f}% / 利益率 {scenario['margin']:.1f}% / "
-                    f"調達額 {scenario['funding']:,.0f} 円 / 期間 {scenario['horizon']}ヶ月"
+                    f"**{scenario.get('name', 'シナリオ')}** — 成長率 {scenario.get('growth', 0.0):.1f}% / 利益率 {scenario.get('margin', 0.0):.1f}% / "
+                    f"調達額 {scenario.get('funding', 0.0):,.0f} 円 / 期間 {scenario.get('horizon', 0)}ヶ月 / "
+                    f"調整幅(単価 {scenario.get('unit_price_adjust_pct', 0.0):.1f}%, 数量 {scenario.get('quantity_adjust_pct', 0.0):.1f}%, 固定費 {scenario.get('fixed_cost_adjust_pct', 0.0):.1f}%)"
                 )
                 if remove_col.button("削除", key=f"remove_scenario_{idx}"):
                     scenarios.pop(idx)
@@ -6506,15 +6673,20 @@ def render_scenario_analysis_section(
         if base_df is None or base_df.empty:
             st.info("先にデータ入力タブで基礎データを設定してください。")
             st.session_state["phase2_summary_df"] = None
+            st.session_state["scenario_profit_ranges"] = None
+            st.session_state["scenario_profit_range_summary"] = None
         elif not scenarios:
             st.info("比較するシナリオを追加してください。")
             st.session_state["phase2_summary_df"] = None
+            st.session_state["scenario_profit_ranges"] = None
+            st.session_state["scenario_profit_range_summary"] = None
         else:
             total = len(scenarios)
             progress = st.progress(0.0)
             results: List[pd.DataFrame] = []
             summaries: List[Dict[str, Any]] = []
             sensitivity_frames: List[pd.DataFrame] = []
+            profit_range_frames: List[pd.DataFrame] = []
             with st.spinner("シナリオを計算しています..."):
                 with ThreadPoolExecutor(max_workers=min(4, total)) as executor:
                     futures = {
@@ -6522,11 +6694,19 @@ def render_scenario_analysis_section(
                         for scenario in scenarios
                     }
                     for idx, future in enumerate(as_completed(futures), start=1):
-                        scenario_name, projection_df, summary_row, sensitivity_df = future.result()
+                        (
+                            scenario_name,
+                            projection_df,
+                            summary_row,
+                            sensitivity_df,
+                            profit_range_df,
+                        ) = future.result()
                         results.append(projection_df)
                         summaries.append(summary_row)
                         if sensitivity_df is not None and not sensitivity_df.empty:
                             sensitivity_frames.append(sensitivity_df)
+                        if profit_range_df is not None and not profit_range_df.empty:
+                            profit_range_frames.append(profit_range_df)
                         progress.progress(idx / total)
             progress.empty()
 
@@ -6535,6 +6715,20 @@ def render_scenario_analysis_section(
                 st.session_state["scenario_results"] = combined_df
                 summary_df = pd.DataFrame(summaries)
                 st.session_state["phase2_summary_df"] = summary_df
+                if profit_range_frames:
+                    combined_profit_range = pd.concat(profit_range_frames, ignore_index=True)
+                    st.session_state["scenario_profit_ranges"] = combined_profit_range
+                    range_summary = (
+                        combined_profit_range.groupby("scenario")["profit"]
+                        .agg(["min", "max"])
+                        .rename(columns={"min": "最小利益", "max": "最大利益"})
+                    )
+                    range_summary["利益幅"] = range_summary["最大利益"] - range_summary["最小利益"]
+                    range_summary = range_summary.reset_index()
+                    st.session_state["scenario_profit_range_summary"] = range_summary
+                else:
+                    st.session_state["scenario_profit_ranges"] = None
+                    st.session_state["scenario_profit_range_summary"] = None
 
                 st.markdown("### 年間売上・利益比較")
                 st.dataframe(
@@ -6546,6 +6740,7 @@ def render_scenario_analysis_section(
                             "期末キャッシュ": "{:.0f}",
                             "成長率(%)": "{:.1f}",
                             "利益率(%)": "{:.1f}",
+                            "調整固定費(月額)": "{:.0f}",
                             "調達額": "{:.0f}",
                         }
                     )
@@ -6575,9 +6770,56 @@ def render_scenario_analysis_section(
                     ).properties(height=320)
                     st.markdown("### 感度分析: 利益率別の年間利益")
                     st.altair_chart(apply_altair_theme(sensitivity_chart), use_container_width=True)
+                if profit_range_frames:
+                    combined_profit_range = pd.concat(profit_range_frames, ignore_index=True)
+                    range_chart = alt.Chart(combined_profit_range).mark_line(point=True).encode(
+                        x=alt.X("adjustment_label:N", title="調整ケース"),
+                        y=alt.Y("profit:Q", title="年間利益"),
+                        color=alt.Color("scenario:N", title="シナリオ"),
+                        tooltip=[
+                            "scenario",
+                            "adjustment_label",
+                            alt.Tooltip("profit", title="年間利益", format=",")
+                        ],
+                    ).properties(height=320)
+                    st.markdown("### 単価・数量・固定費の利益レンジ")
+                    st.altair_chart(apply_altair_theme(range_chart), use_container_width=True)
+                    display_profit_range = combined_profit_range.rename(
+                        columns={
+                            "unit_price_pct": "単価変化(%)",
+                            "quantity_pct": "数量変化(%)",
+                            "fixed_cost_pct": "固定費変化(%)",
+                            "sales": "年間売上",
+                            "profit": "年間利益",
+                        }
+                    )
+                    st.dataframe(
+                        display_profit_range.style.format(
+                            {
+                                "単価変化(%)": "{:.1f}",
+                                "数量変化(%)": "{:.1f}",
+                                "固定費変化(%)": "{:.1f}",
+                                "年間売上": "{:.0f}",
+                                "年間利益": "{:.0f}",
+                            }
+                        )
+                    )
+                    range_summary = st.session_state.get("scenario_profit_range_summary")
+                    if isinstance(range_summary, pd.DataFrame) and not range_summary.empty:
+                        st.dataframe(
+                            range_summary.style.format(
+                                {
+                                    "最小利益": "{:.0f}",
+                                    "最大利益": "{:.0f}",
+                                    "利益幅": "{:.0f}",
+                                }
+                            )
+                        )
             else:
                 st.info("シナリオ計算結果を取得できませんでした。")
                 st.session_state["phase2_summary_df"] = None
+                st.session_state["scenario_profit_ranges"] = None
+                st.session_state["scenario_profit_range_summary"] = None
 
     with tabs[3]:
         st.header("レポート出力")
@@ -6589,7 +6831,8 @@ def render_scenario_analysis_section(
         if scenario_results is None or scenario_results.empty:
             st.info("シナリオ比較を実行するとレポートを出力できます。")
         else:
-            report_text = generate_phase2_report(summary_df, swot, benchmark_df)
+            profit_range_summary = st.session_state.get("scenario_profit_range_summary")
+            report_text = generate_phase2_report(summary_df, swot, benchmark_df, profit_range_summary)
             st.session_state["phase2_report_summary"] = report_text
             st.download_button(
                 "PDF出力 (テキスト)",
@@ -6605,6 +6848,11 @@ def render_scenario_analysis_section(
                     summary_df.to_excel(writer, sheet_name="summary", index=False)
                 if benchmark_df is not None:
                     benchmark_df.to_excel(writer, sheet_name="benchmark", index=False)
+                profit_range_df = st.session_state.get("scenario_profit_ranges")
+                if isinstance(profit_range_df, pd.DataFrame) and not profit_range_df.empty:
+                    profit_range_df.to_excel(writer, sheet_name="profit_ranges", index=False)
+                if isinstance(profit_range_summary, pd.DataFrame) and not profit_range_summary.empty:
+                    profit_range_summary.to_excel(writer, sheet_name="profit_range_summary", index=False)
             st.download_button(
                 "Excel出力",
                 excel_buffer.getvalue(),
@@ -7084,6 +7332,7 @@ def main() -> None:
         format="%.0f",
         help="固定費に該当する販管費の合計額です。人件費・地代家賃・システム利用料などを含めて設定します。",
     )
+    st.session_state["sidebar_fixed_cost"] = float(fixed_cost)
     starting_cash = st.sidebar.number_input(
         "現在の現金残高（円）",
         value=3_000_000.0,
