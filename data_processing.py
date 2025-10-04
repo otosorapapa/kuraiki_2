@@ -10,6 +10,17 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import requests
+from pandas.api.types import is_period_dtype
+
+try:  # pragma: no cover - optional dependency
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+except Exception:  # pragma: no cover - statsmodels may be unavailable during tests
+    SARIMAX = None
+
+try:  # pragma: no cover - optional dependency
+    import tensorflow as tf
+except Exception:  # pragma: no cover - tensorflow may not be installed in some environments
+    tf = None
 
 # 共通で利用する列名の定義
 NORMALIZED_SALES_COLUMNS = [
@@ -136,6 +147,19 @@ class ValidationReport:
     def __bool__(self) -> bool:  # pragma: no cover - convenience
         return bool(self.messages) or not self.duplicate_rows.empty
 
+
+@dataclass
+class ForecastModelArtifact:
+    """Container for trained売上予測モデル."""
+
+    model_type: str
+    freq: str
+    training_series: pd.Series
+    fitted_model: Any
+    window_size: int = 12
+    scaler_min: Optional[float] = None
+    scaler_scale: Optional[float] = None
+    metrics: Dict[str, float] = field(default_factory=dict)
 
 def detect_duplicate_rows(
     df: pd.DataFrame,
@@ -681,6 +705,395 @@ def aggregate_sales(df: pd.DataFrame, group_fields: List[str]) -> pd.DataFrame:
         return pd.DataFrame(columns=group_fields + ["sales_amount"])
     aggregated = df.groupby(group_fields)["sales_amount"].sum().reset_index()
     return aggregated
+
+
+def _mean_absolute_percentage_error(actual: Iterable[float], predicted: Iterable[float]) -> float:
+    """Return the平均絶対パーセント誤差."""
+
+    actual_arr = np.asarray(actual, dtype=float)
+    predicted_arr = np.asarray(predicted, dtype=float)
+    if actual_arr.size == 0 or predicted_arr.size == 0:
+        return float("nan")
+    mask = np.abs(actual_arr) > 1e-8
+    if not np.any(mask):
+        return float("nan")
+    return float(np.mean(np.abs((actual_arr[mask] - predicted_arr[mask]) / actual_arr[mask])))
+
+
+def _compute_naive_mape(series: pd.Series) -> float:
+    """Compute naiveな前月値比較のMAPE."""
+
+    if series is None or series.empty:
+        return float("nan")
+    shifted = series.shift(1).dropna()
+    if shifted.empty:
+        return float("nan")
+    aligned_actual = series.iloc[1 : len(series)]
+    return _mean_absolute_percentage_error(aligned_actual.values, shifted.values)
+
+
+def _z_score_from_confidence(confidence_level: float) -> float:
+    """Approximate Z値 from信頼水準."""
+
+    lookup = {
+        0.80: 1.2816,
+        0.85: 1.4395,
+        0.90: 1.6449,
+        0.95: 1.96,
+        0.98: 2.3263,
+        0.99: 2.5758,
+    }
+    rounded = round(float(confidence_level), 2)
+    return float(lookup.get(rounded, lookup.get(0.95)))
+
+
+def _prepare_monthly_sales_series(
+    summary_df: pd.DataFrame,
+    freq: str,
+    *,
+    min_periods: int = 6,
+) -> pd.Series:
+    """月次売上サマリからモデリング用の時系列を生成する。"""
+
+    if summary_df is None or summary_df.empty:
+        raise ValueError("月次売上サマリが空のため学習できません。")
+    if "order_month" not in summary_df.columns or "sales_amount" not in summary_df.columns:
+        raise ValueError("月次サマリに必要な列が不足しています。")
+
+    working = summary_df[["order_month", "sales_amount"]].copy()
+    working.sort_values("order_month", inplace=True)
+    series = working.set_index("order_month")["sales_amount"].astype(float)
+
+    if isinstance(series.index, pd.PeriodIndex):
+        series.index = series.index.asfreq(freq)
+    elif isinstance(series.index, pd.DatetimeIndex):
+        series.index = series.index.to_period(freq)
+    else:
+        series.index = pd.PeriodIndex(series.index, freq=freq)
+
+    full_index = pd.period_range(series.index.min(), series.index.max(), freq=freq)
+    series = series.reindex(full_index)
+    if series.isna().all():
+        raise ValueError("売上時系列に有効な値がありません。")
+    series = series.fillna(method="ffill").fillna(method="bfill").fillna(0.0)
+
+    if series.count() < min_periods:
+        raise ValueError("学習に十分な期間のデータがありません。")
+
+    return series
+
+
+def _build_lstm_training_data(
+    series: pd.Series, window_size: int
+) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    """LSTM用の教師データとスケーリング情報を返す。"""
+
+    values = series.astype(float).values.astype("float32")
+    min_val = float(np.min(values))
+    max_val = float(np.max(values))
+    scale = float(max(max_val - min_val, 1.0))
+    normalized = (values - min_val) / scale
+    if len(normalized) <= window_size:
+        raise ValueError("LSTM学習にはウィンドウサイズより多いサンプルが必要です。")
+    sequences: List[np.ndarray] = []
+    targets: List[float] = []
+    for idx in range(window_size, len(normalized)):
+        sequences.append(normalized[idx - window_size : idx])
+        targets.append(normalized[idx])
+    X = np.asarray(sequences, dtype="float32")
+    y = np.asarray(targets, dtype="float32")
+    X = X.reshape((X.shape[0], X.shape[1], 1))
+    return X, y, min_val, scale
+
+
+def train_forecast_model(
+    monthly_summary: pd.DataFrame,
+    *,
+    model_type: str = "arima",
+    freq: str = "M",
+    window_size: int = 12,
+    arima_order: Tuple[int, int, int] = (1, 1, 1),
+    seasonal_order: Tuple[int, int, int, int] = (0, 0, 0, 0),
+    lstm_params: Optional[Dict[str, Any]] = None,
+    sarimax_kwargs: Optional[Dict[str, Any]] = None,
+) -> ForecastModelArtifact:
+    """月次売上データからARIMA/LSTMモデルを学習する。"""
+
+    series = _prepare_monthly_sales_series(monthly_summary, freq, min_periods=max(6, window_size))
+    metrics: Dict[str, float] = {"avg_sales": float(series.tail(min(len(series), 12)).mean())}
+    model_type_normalized = (model_type or "arima").lower()
+
+    if model_type_normalized == "lstm":
+        if tf is None:  # pragma: no cover - depends on optional dependency
+            raise ImportError("TensorFlowがインストールされていないためLSTMモデルを利用できません。")
+        lstm_params = lstm_params or {}
+        units = int(lstm_params.get("units", 32))
+        dropout = float(lstm_params.get("dropout", 0.0))
+        epochs = int(lstm_params.get("epochs", 120))
+        batch_size = max(1, int(lstm_params.get("batch_size", 8)))
+
+        X, y, min_val, scale = _build_lstm_training_data(series, window_size)
+        model = tf.keras.Sequential(
+            [
+                tf.keras.layers.Input(shape=(window_size, 1)),
+                tf.keras.layers.LSTM(units, dropout=dropout),
+                tf.keras.layers.Dense(1),
+            ]
+        )
+        model.compile(optimizer="adam", loss="mse")
+        if len(X) > 0:
+            model.fit(X, y, epochs=max(1, epochs), batch_size=batch_size, verbose=0)
+        predictions_scaled = model.predict(X, verbose=0).flatten()
+        predictions = predictions_scaled * scale + min_val
+        actual = series.iloc[window_size:].astype(float).values
+        metrics["model_mape"] = _mean_absolute_percentage_error(actual, predictions)
+        metrics["baseline_mape"] = _compute_naive_mape(series)
+        if not math.isnan(metrics["baseline_mape"]) and not math.isnan(metrics["model_mape"]):
+            metrics["mape_improvement"] = max(0.0, metrics["baseline_mape"] - metrics["model_mape"])
+        else:
+            metrics["mape_improvement"] = float("nan")
+        metrics["residual_std"] = float(np.nanstd(actual - predictions))
+        return ForecastModelArtifact(
+            model_type="lstm",
+            freq=freq,
+            training_series=series,
+            fitted_model=model,
+            window_size=window_size,
+            scaler_min=min_val,
+            scaler_scale=scale,
+            metrics=metrics,
+        )
+
+    if SARIMAX is None:  # pragma: no cover - depends on optional dependency
+        raise ImportError("statsmodelsがインストールされていないためARIMAモデルを利用できません。")
+    if len(series) < 3:
+        raise ValueError("ARIMAモデルの学習には最低3期間のデータが必要です。")
+    sarimax_kwargs = sarimax_kwargs or {}
+    model = SARIMAX(
+        series,
+        order=arima_order,
+        seasonal_order=seasonal_order,
+        enforce_stationarity=False,
+        enforce_invertibility=False,
+        **sarimax_kwargs,
+    )
+    results = model.fit(disp=False)
+    fitted_values = results.fittedvalues.astype(float)
+    aligned_pred = fitted_values.iloc[1:].astype(float)
+    aligned_actual = series.iloc[1:].astype(float)
+    aligned_pred = aligned_pred.reindex(aligned_actual.index)
+    metrics["model_mape"] = _mean_absolute_percentage_error(aligned_actual.values, aligned_pred.values)
+    metrics["baseline_mape"] = _compute_naive_mape(series)
+    if not math.isnan(metrics["baseline_mape"]) and not math.isnan(metrics["model_mape"]):
+        metrics["mape_improvement"] = max(0.0, metrics["baseline_mape"] - metrics["model_mape"])
+    else:
+        metrics["mape_improvement"] = float("nan")
+    metrics["residual_std"] = float(np.nanstd(aligned_actual.values - aligned_pred.values))
+
+    return ForecastModelArtifact(
+        model_type="arima",
+        freq=freq,
+        training_series=series,
+        fitted_model=results,
+        window_size=window_size,
+        metrics=metrics,
+    )
+
+
+def predict_sales_forecast(
+    artifact: ForecastModelArtifact,
+    periods: int = 6,
+    *,
+    confidence_level: float = 0.9,
+) -> pd.DataFrame:
+    """学習済みモデルから売上予測と信頼区間を生成する。"""
+
+    if artifact is None:
+        raise ValueError("予測モデルが未提供です。")
+    if periods <= 0:
+        raise ValueError("予測期間は1以上で指定してください。")
+
+    freq = artifact.freq or "M"
+    last_period = artifact.training_series.index[-1]
+    start_period = last_period + 1
+    forecast_index = pd.period_range(start_period, periods=periods, freq=freq)
+
+    lower = np.full(periods, np.nan, dtype=float)
+    upper = np.full(periods, np.nan, dtype=float)
+
+    if artifact.model_type == "arima":
+        forecast_result = artifact.fitted_model.get_forecast(steps=periods)
+        predicted_mean = pd.Series(forecast_result.predicted_mean, index=forecast_index).astype(float)
+        alpha = 1.0 - confidence_level
+        conf_int = forecast_result.conf_int(alpha=alpha)
+        if isinstance(conf_int, pd.DataFrame):
+            lower = conf_int.iloc[:, 0].to_numpy(dtype=float)
+            upper = conf_int.iloc[:, -1].to_numpy(dtype=float)
+        else:
+            lower = np.asarray(conf_int[:, 0], dtype=float)
+            upper = np.asarray(conf_int[:, 1], dtype=float)
+    elif artifact.model_type == "lstm":
+        if tf is None:  # pragma: no cover - depends on optional dependency
+            raise ImportError("TensorFlowが利用できません。")
+        scale = artifact.scaler_scale or 1.0
+        min_val = artifact.scaler_min or 0.0
+        window_size = artifact.window_size
+        history = artifact.training_series.astype(float).values.astype("float32")
+        normalized_history = (history - min_val) / (scale if scale != 0 else 1.0)
+        recent_window = normalized_history[-window_size:].copy()
+        predictions: List[float] = []
+        for step in range(periods):
+            input_window = recent_window.reshape(1, window_size, 1)
+            pred_scaled = artifact.fitted_model.predict(input_window, verbose=0)[0, 0]
+            predictions.append(float(pred_scaled * scale + min_val))
+            recent_window = np.append(recent_window[1:], pred_scaled)
+        predicted_mean = pd.Series(predictions, index=forecast_index)
+        residual_std = float(artifact.metrics.get("residual_std", 0.0))
+        z_value = _z_score_from_confidence(confidence_level)
+        lower = predicted_mean.to_numpy(dtype=float) - z_value * residual_std
+        upper = predicted_mean.to_numpy(dtype=float) + z_value * residual_std
+    else:
+        raise ValueError(f"未対応のモデルタイプです: {artifact.model_type}")
+
+    lower = np.maximum(0.0, lower)
+    forecast_df = pd.DataFrame(
+        {
+            "month": forecast_index,
+            "forecast": predicted_mean.to_numpy(dtype=float),
+            "lower_ci": lower,
+            "upper_ci": upper,
+        }
+    )
+    forecast_df["confidence_level"] = confidence_level
+    forecast_df["model_type"] = artifact.model_type
+    return forecast_df
+
+
+def apply_forecast_to_cashflow(
+    plan_df: pd.DataFrame,
+    forecast_df: pd.DataFrame,
+    monthly_summary: pd.DataFrame,
+    *,
+    retention_rate: float = 0.75,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """売上予測をキャッシュフロー計画へ反映し、影響サマリを返す。"""
+
+    if plan_df is None or plan_df.empty or forecast_df is None or forecast_df.empty:
+        return (plan_df.copy() if isinstance(plan_df, pd.DataFrame) else pd.DataFrame(), pd.DataFrame())
+
+    working = plan_df.copy()
+    if not is_period_dtype(working["month"]):
+        working["month"] = pd.PeriodIndex(working["month"], freq="M")
+
+    forecast_working = forecast_df.copy()
+    forecast_working["month"] = pd.PeriodIndex(forecast_working["month"], freq="M")
+    forecast_working = forecast_working.rename(
+        columns={
+            "forecast": "sales_forecast",
+            "lower_ci": "sales_forecast_lower",
+            "upper_ci": "sales_forecast_upper",
+        }
+    )
+
+    merged = working.merge(forecast_working, on="month", how="left")
+    merged["baseline_operating_cf"] = merged["operating_cf"].astype(float)
+
+    margin_ratio = 0.3
+    if monthly_summary is not None and not monthly_summary.empty:
+        total_sales = float(monthly_summary["sales_amount"].sum())
+        total_net = float(monthly_summary["net_gross_profit"].sum())
+        if total_sales > 0:
+            margin_ratio = max(0.0, min(1.0, total_net / total_sales))
+
+    for column in ["sales_forecast", "sales_forecast_lower", "sales_forecast_upper"]:
+        if column in merged.columns:
+            merged[column] = merged[column].astype(float)
+
+    merged["operating_cf_forecast"] = merged["sales_forecast"] * margin_ratio * retention_rate
+    merged["operating_cf_lower"] = merged["sales_forecast_lower"] * margin_ratio * retention_rate
+    merged["operating_cf_upper"] = merged["sales_forecast_upper"] * margin_ratio * retention_rate
+
+    mask = merged["operating_cf_forecast"].notna()
+    merged.loc[mask, "operating_cf"] = merged.loc[mask, "operating_cf_forecast"]
+
+    baseline_mean = float(merged["baseline_operating_cf"].mean())
+    adjusted_mean = float(merged["operating_cf"].mean())
+    baseline_total = float(merged["baseline_operating_cf"].sum())
+    adjusted_total = float(merged["operating_cf"].sum())
+
+    summary_df = pd.DataFrame(
+        {
+            "指標": ["平均営業CF", "累積営業CF"],
+            "現状": [baseline_mean, baseline_total],
+            "予測適用": [adjusted_mean, adjusted_total],
+            "差分": [adjusted_mean - baseline_mean, adjusted_total - baseline_total],
+        }
+    )
+
+    return merged, summary_df
+
+
+def estimate_forecast_savings(
+    artifact: Optional[ForecastModelArtifact],
+    monthly_summary: Optional[pd.DataFrame],
+    *,
+    error_cost_factor: float = 0.12,
+) -> pd.DataFrame:
+    """予測誤差改善によるコスト削減効果を推計する。"""
+
+    if artifact is None:
+        return pd.DataFrame()
+
+    metrics = artifact.metrics or {}
+    baseline_mape = metrics.get("baseline_mape")
+    model_mape = metrics.get("model_mape")
+    improvement = metrics.get("mape_improvement")
+
+    if baseline_mape is None or model_mape is None:
+        return pd.DataFrame()
+
+    avg_sales = float("nan")
+    if monthly_summary is not None and not monthly_summary.empty:
+        recent = monthly_summary.tail(12)
+        if not recent.empty:
+            avg_sales = float(recent["sales_amount"].mean())
+    if not math.isfinite(avg_sales) or avg_sales <= 0:
+        avg_sales = float(metrics.get("avg_sales", float("nan")))
+
+    base_cost = avg_sales * error_cost_factor if math.isfinite(avg_sales) and avg_sales > 0 else float("nan")
+    baseline_loss = base_cost * baseline_mape if math.isfinite(base_cost) else float("nan")
+    improved_loss = base_cost * model_mape if math.isfinite(base_cost) else float("nan")
+    annual_savings = (
+        (baseline_loss - improved_loss) * 12 if math.isfinite(baseline_loss) and math.isfinite(improved_loss) else float("nan")
+    )
+
+    rows: List[Dict[str, float]] = []
+    if math.isfinite(avg_sales):
+        rows.append({"指標": "平均月次売上高", "現状": avg_sales, "予測適用": avg_sales, "差分": 0.0})
+    if baseline_mape is not None and model_mape is not None:
+        rows.append(
+            {
+                "指標": "予測MAPE",
+                "現状": baseline_mape,
+                "予測適用": model_mape,
+                "差分": model_mape - baseline_mape,
+            }
+        )
+    if improvement is not None and not math.isnan(improvement):
+        rows.append({"指標": "誤差改善率", "現状": float("nan"), "予測適用": improvement, "差分": float("nan")})
+    if math.isfinite(baseline_loss) and math.isfinite(improved_loss):
+        rows.append(
+            {
+                "指標": "在庫・調達コスト(月次)",
+                "現状": baseline_loss,
+                "予測適用": improved_loss,
+                "差分": improved_loss - baseline_loss,
+            }
+        )
+    if math.isfinite(annual_savings):
+        rows.append({"指標": "年間コスト削減見込", "現状": float("nan"), "予測適用": annual_savings, "差分": float("nan")})
+
+    return pd.DataFrame(rows)
 
 
 def monthly_sales_summary(df: pd.DataFrame) -> pd.DataFrame:
