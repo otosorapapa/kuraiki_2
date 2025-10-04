@@ -23,35 +23,41 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_plotly_events import plotly_events
 
-from data_processing import (
-    DEFAULT_FIXED_COST,
-    annotate_customer_segments,
-    build_alerts,
-    calculate_kpis,
-    create_current_pl,
-    create_default_cashflow_plan,
-    fetch_sales_from_endpoint,
-    forecast_cashflow,
-    train_forecast_model,
-    predict_sales_forecast,
-    apply_forecast_to_cashflow,
-    estimate_forecast_savings,
-    generate_sample_cost_data,
-    generate_sample_sales_data,
-    generate_sample_subscription_data,
-    detect_duplicate_rows,
-    validate_channel_fees,
-    ValidationReport,
-    load_cost_workbook,
-    load_sales_files,
-    load_subscription_workbook,
-    merge_sales_and_costs,
-    monthly_sales_summary,
-    simulate_pl,
-    compute_channel_share,
-    compute_category_share,
-    compute_kpi_breakdown,
-)
+
+DATA_PROCESSING_IMPORT_ERROR: Optional[BaseException] = None
+try:
+    from data_processing import (
+        DEFAULT_FIXED_COST,
+        annotate_customer_segments,
+        build_alerts,
+        calculate_kpis,
+        create_current_pl,
+        create_default_cashflow_plan,
+        fetch_sales_from_endpoint,
+        forecast_cashflow,
+        train_forecast_model,
+        predict_sales_forecast,
+        apply_forecast_to_cashflow,
+        estimate_forecast_savings,
+        generate_sample_cost_data,
+        generate_sample_sales_data,
+        generate_sample_subscription_data,
+        detect_duplicate_rows,
+        validate_channel_fees,
+        ValidationReport,
+        load_cost_workbook,
+        load_sales_files,
+        load_subscription_workbook,
+        merge_sales_and_costs,
+        monthly_sales_summary,
+        simulate_pl,
+        compute_channel_share,
+        compute_category_share,
+        compute_kpi_breakdown,
+    )
+except ImportError as import_error:
+    DATA_PROCESSING_IMPORT_ERROR = import_error
+
 
 st.set_page_config(
     page_title="経営ダッシュボード",
@@ -62,6 +68,38 @@ st.set_page_config(
 
 
 logger = logging.getLogger(__name__)
+
+
+def _render_data_processing_import_error(error: BaseException) -> None:
+    """Display a user-friendly message when data_processing import fails."""
+
+    logger.exception("Failed to import data_processing module", exc_info=error)
+    st.title("初期化エラー")
+    st.error("データ処理モジュールの読み込みに失敗しました。依存関係を確認してください。")
+
+    missing_package: Optional[str] = None
+    if isinstance(error, ModuleNotFoundError):
+        missing_package = getattr(error, "name", None)
+    if missing_package:
+        st.markdown(f"- 不足しているモジュール: `{missing_package}`")
+
+    st.markdown(
+        "- 仮想環境で `pip install -r requirements.txt` を実行し、依存関係を再インストールしてください。"
+    )
+    st.markdown(
+        "- Streamlit Cloud を利用している場合は、アプリの `Manage app` からログを確認し不足モジュールを追加してください。"
+    )
+
+    with st.expander("エラーログの詳細"):
+        formatted = "".join(
+            traceback.format_exception(type(error), error, error.__traceback__)
+        )
+        st.code(formatted, language="python")
+
+
+if DATA_PROCESSING_IMPORT_ERROR is not None:
+    _render_data_processing_import_error(DATA_PROCESSING_IMPORT_ERROR)
+    st.stop()
 
 
 def trigger_rerun() -> None:

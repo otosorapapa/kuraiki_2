@@ -3,6 +3,7 @@ from __future__ import annotations
 
 # TODO: pandasとnumpyを使ってデータ集計を行う
 import io
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -23,6 +24,8 @@ except Exception:  # pragma: no cover - tensorflow may not be installed in some 
     tf = None
 
 # 共通で利用する列名の定義
+
+logger = logging.getLogger(__name__)
 NORMALIZED_SALES_COLUMNS = [
     "order_date",
     "channel",
@@ -732,6 +735,36 @@ def _compute_naive_mape(series: pd.Series) -> float:
     return _mean_absolute_percentage_error(aligned_actual.values, shifted.values)
 
 
+def _build_naive_forecast_artifact(
+    series: pd.Series,
+    freq: str,
+    metrics: Dict[str, float],
+    window_size: int,
+    *,
+    reason: str,
+) -> ForecastModelArtifact:
+    """Generate a simple persistence forecast artifact as a graceful fallback."""
+
+    metrics_copy: Dict[str, float] = dict(metrics)
+    naive_mape = _compute_naive_mape(series)
+    metrics_copy.setdefault("baseline_mape", naive_mape)
+    metrics_copy["model_mape"] = naive_mape
+    metrics_copy["mape_improvement"] = 0.0
+    residuals = series.diff().dropna().astype(float)
+    metrics_copy["residual_std"] = (
+        float(np.nanstd(residuals.values)) if not residuals.empty else 0.0
+    )
+    logger.warning("Falling back to naive forecast: %s", reason)
+    return ForecastModelArtifact(
+        model_type="naive",
+        freq=freq,
+        training_series=series,
+        fitted_model=None,
+        window_size=window_size,
+        metrics=metrics_copy,
+    )
+
+
 def _z_score_from_confidence(confidence_level: float) -> float:
     """Approximate Z値 from信頼水準."""
 
@@ -817,7 +850,10 @@ def train_forecast_model(
     lstm_params: Optional[Dict[str, Any]] = None,
     sarimax_kwargs: Optional[Dict[str, Any]] = None,
 ) -> ForecastModelArtifact:
-    """月次売上データからARIMA/LSTMモデルを学習する。"""
+    """月次売上データからARIMA/LSTMモデルを学習する。
+
+    オプション依存関係が利用できない場合はナイーブ予測へフォールバックする。
+    """
 
     series = _prepare_monthly_sales_series(monthly_summary, freq, min_periods=max(6, window_size))
     metrics: Dict[str, float] = {"avg_sales": float(series.tail(min(len(series), 12)).mean())}
@@ -825,7 +861,13 @@ def train_forecast_model(
 
     if model_type_normalized == "lstm":
         if tf is None:  # pragma: no cover - depends on optional dependency
-            raise ImportError("TensorFlowがインストールされていないためLSTMモデルを利用できません。")
+            return _build_naive_forecast_artifact(
+                series,
+                freq,
+                metrics,
+                window_size,
+                reason="TensorFlow is unavailable",
+            )
         lstm_params = lstm_params or {}
         units = int(lstm_params.get("units", 32))
         dropout = float(lstm_params.get("dropout", 0.0))
@@ -865,19 +907,34 @@ def train_forecast_model(
         )
 
     if SARIMAX is None:  # pragma: no cover - depends on optional dependency
-        raise ImportError("statsmodelsがインストールされていないためARIMAモデルを利用できません。")
+        return _build_naive_forecast_artifact(
+            series,
+            freq,
+            metrics,
+            window_size,
+            reason="statsmodels is unavailable",
+        )
     if len(series) < 3:
         raise ValueError("ARIMAモデルの学習には最低3期間のデータが必要です。")
     sarimax_kwargs = sarimax_kwargs or {}
-    model = SARIMAX(
-        series,
-        order=arima_order,
-        seasonal_order=seasonal_order,
-        enforce_stationarity=False,
-        enforce_invertibility=False,
-        **sarimax_kwargs,
-    )
-    results = model.fit(disp=False)
+    try:
+        model = SARIMAX(
+            series,
+            order=arima_order,
+            seasonal_order=seasonal_order,
+            enforce_stationarity=False,
+            enforce_invertibility=False,
+            **sarimax_kwargs,
+        )
+        results = model.fit(disp=False)
+    except Exception as exc:  # pragma: no cover - graceful fallback path
+        return _build_naive_forecast_artifact(
+            series,
+            freq,
+            metrics,
+            window_size,
+            reason=f"ARIMA training failed ({exc})",
+        )
     fitted_values = results.fittedvalues.astype(float)
     aligned_pred = fitted_values.iloc[1:].astype(float)
     aligned_actual = series.iloc[1:].astype(float)
@@ -906,7 +963,10 @@ def predict_sales_forecast(
     *,
     confidence_level: float = 0.9,
 ) -> pd.DataFrame:
-    """学習済みモデルから売上予測と信頼区間を生成する。"""
+    """学習済みモデルから売上予測と信頼区間を生成する。
+
+    ナイーブ予測アーティファクトにも対応し、最後の実績値を将来値として使用する。
+    """
 
     if artifact is None:
         raise ValueError("予測モデルが未提供です。")
@@ -952,6 +1012,16 @@ def predict_sales_forecast(
         z_value = _z_score_from_confidence(confidence_level)
         lower = predicted_mean.to_numpy(dtype=float) - z_value * residual_std
         upper = predicted_mean.to_numpy(dtype=float) + z_value * residual_std
+    elif artifact.model_type == "naive":
+        last_value = float(artifact.training_series.iloc[-1])
+        predictions = np.full(periods, last_value, dtype=float)
+        predicted_mean = pd.Series(predictions, index=forecast_index)
+        residual_std = float(artifact.metrics.get("residual_std", 0.0))
+        if not math.isfinite(residual_std):
+            residual_std = 0.0
+        z_value = _z_score_from_confidence(confidence_level)
+        lower = predictions - z_value * residual_std
+        upper = predictions + z_value * residual_std
     else:
         raise ValueError(f"未対応のモデルタイプです: {artifact.model_type}")
 
