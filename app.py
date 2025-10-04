@@ -199,6 +199,25 @@ def widget_key_for(state_key: str) -> str:
     return f"_{state_key}_widget"
 
 
+VALID_ICON_TONES = {"accent", "muted", "success", "warning", "error"}
+
+
+def build_ui_icon(code: str, *, tone: str = "accent", circle: bool = True) -> str:
+    """指定したコードから単色スタイルのUIアイコンHTMLを生成する。"""
+
+    safe_code = html.escape(code or "")
+    icon_tone = tone if tone in VALID_ICON_TONES else "accent"
+    classes = ["ui-icon"]
+    if circle:
+        classes.append("ui-icon--circle")
+    classes.append(f"ui-icon--{icon_tone}")
+    class_attr = " ".join(classes)
+    return (
+        f"<span class=\"{class_attr}\" data-icon=\"{safe_code}\" "
+        "aria-hidden=\"true\"></span>"
+    )
+
+
 def _clone_state_value(value: Any) -> Any:
     """リストなどのミュータブル値をコピーし、副作用を防ぐ。"""
 
@@ -344,27 +363,27 @@ ANCILLARY_UPLOAD_CONFIGS: List[Dict[str, Any]] = [
 ]
 
 
-STATUS_PILL_DETAILS: Dict[str, Tuple[str, str]] = {
-    "ok": ("✅", "正常"),
-    "warning": ("⚠️", "警告"),
-    "error": ("⛔", "エラー"),
+STATUS_PILL_DETAILS: Dict[str, Tuple[str, str, str]] = {
+    "ok": ("OK", "success", "正常"),
+    "warning": ("!", "warning", "警告"),
+    "error": ("×", "error", "エラー"),
 }
 
 
 PRIMARY_NAV_ITEMS: List[Dict[str, str]] = [
-    {"key": "dashboard", "label": "Dashboard", "icon": "📊"},
-    {"key": "sales", "label": "売上", "icon": "🛒"},
-    {"key": "gross", "label": "粗利", "icon": "💹"},
-    {"key": "inventory", "label": "在庫", "icon": "📦"},
-    {"key": "cash", "label": "資金", "icon": "💰"},
-    {"key": "kpi", "label": "KPI", "icon": "📈"},
-    {"key": "scenario", "label": "シナリオ分析", "icon": "🧮"},
-    {"key": "data", "label": "データ管理", "icon": "🗂"},
+    {"key": "dashboard", "label": "Dashboard", "icon": "DB"},
+    {"key": "sales", "label": "売上", "icon": "SL"},
+    {"key": "gross", "label": "粗利", "icon": "GR"},
+    {"key": "inventory", "label": "在庫", "icon": "IV"},
+    {"key": "cash", "label": "資金", "icon": "CS"},
+    {"key": "kpi", "label": "KPI", "icon": "KP"},
+    {"key": "scenario", "label": "シナリオ分析", "icon": "SC"},
+    {"key": "data", "label": "データ管理", "icon": "DT"},
 ]
 
 NAV_LABEL_LOOKUP: Dict[str, str] = {item["key"]: item["label"] for item in PRIMARY_NAV_ITEMS}
 NAV_OPTION_LOOKUP: Dict[str, str] = {
-    item["key"]: f"{item['icon']} {item['label']}" for item in PRIMARY_NAV_ITEMS
+    item["key"]: f"[{item['icon']}] {item['label']}" for item in PRIMARY_NAV_ITEMS
 }
 
 TUTORIAL_INDEX: List[Dict[str, Any]] = [
@@ -843,6 +862,69 @@ def inject_mckinsey_style(
             font-size: var(--body-size);
             line-height: var(--body-line-height);
         }}
+        .with-icon {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }}
+        .with-icon--tight {{
+            gap: 0.3rem;
+        }}
+        .ui-icon {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.3rem;
+            width: 1.3rem;
+            height: 1.3rem;
+            border-radius: 0.4rem;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            font-family: var(--alt-font-family);
+        }}
+        .ui-icon::before {{
+            content: attr(data-icon);
+            line-height: 1;
+        }}
+        .ui-icon--circle {{
+            border-radius: 999px;
+        }}
+        .ui-icon--accent {{
+            background: var(--accent-color);
+            color: #ffffff;
+        }}
+        .ui-icon--muted {{
+            background: var(--secondary-color);
+            color: #ffffff;
+        }}
+        .ui-icon--success {{
+            background: var(--success-color);
+            color: #ffffff;
+        }}
+        .ui-icon--warning {{
+            background: var(--warning-color);
+            color: #ffffff;
+        }}
+        .ui-icon--error {{
+            background: var(--error-color);
+            color: #ffffff;
+        }}
+        .caption-with-icon {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            color: var(--caption-text-color);
+            font-size: var(--caption-size);
+            line-height: var(--caption-line-height);
+        }}
+        .caption-with-icon .ui-icon {{
+            min-width: 1.1rem;
+            width: 1.1rem;
+            height: 1.1rem;
+            font-size: 0.6rem;
+        }}
         main .block-container h1,
         main .block-container h2,
         main .block-container h3,
@@ -933,6 +1015,19 @@ def inject_mckinsey_style(
         .hero-badge--accent {{
             background: rgba(30,136,229,0.28);
         }}
+        .hero-badge .ui-icon {{
+            background: rgba(255,255,255,0.35);
+        }}
+        .hero-badge--alert .ui-icon {{
+            background: var(--warning-color);
+        }}
+        .hero-badge--accent .ui-icon {{
+            background: var(--accent-color);
+        }}
+        .hero-badge__label {{
+            display: inline-flex;
+            align-items: center;
+        }}
         .hero-persona {{
             display: flex;
             flex-wrap: wrap;
@@ -945,6 +1040,13 @@ def inject_mckinsey_style(
             border-radius: 999px;
             font-size: 0.8rem;
             font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }}
+        .hero-chip .ui-icon {{
+            background: rgba(255,255,255,0.35);
+            color: #0b1f3b;
         }}
         .chart-section {{
             background: var(--surface-color);
@@ -1011,6 +1113,13 @@ def inject_mckinsey_style(
             color: var(--text-color);
             font-size: 0.8rem;
             font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+        }}
+        .dashboard-meta__chip .ui-icon {{
+            background: var(--accent-color);
+            color: #ffffff;
         }}
         .dashboard-meta--empty {{
             padding: 0.4rem 0.85rem;
@@ -1093,6 +1202,10 @@ def inject_mckinsey_style(
             font-size: 0.8rem;
             font-weight: 600;
         }}
+        .status-pill .ui-icon {{
+            background: rgba(255,255,255,0.25);
+            color: inherit;
+        }}
         .status-pill--ok {{
             background: var(--success-surface);
             color: var(--success-color);
@@ -1126,6 +1239,15 @@ def inject_mckinsey_style(
             border-color: rgba(var(--warning-rgb), 0.35);
             color: var(--warning-color);
         }}
+        .alert-banner__title {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-weight: 700;
+        }}
+        .alert-banner__title .ui-icon {{
+            color: #ffffff;
+        }}
         .alert-banner--ok {{
             background: var(--success-surface);
             border-color: rgba(var(--success-rgb), 0.35);
@@ -1143,6 +1265,32 @@ def inject_mckinsey_style(
             padding: 1.25rem 1.4rem;
             border: 1px solid var(--border-subtle-color);
             box-shadow: var(--shadow-md);
+        }}
+        .data-status-card__status {{
+            margin-top: 0.8rem;
+            font-weight: 700;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: var(--radius-chip);
+        }}
+        .data-status-card__status .ui-icon {{
+            background: currentColor;
+            color: #ffffff;
+        }}
+        .data-status-card__status--ok {{
+            background: var(--success-surface);
+            color: var(--success-color);
+        }}
+        .data-status-card__status--warning {{
+            background: var(--warning-surface);
+            color: var(--warning-color);
+        }}
+        .data-status-card__status--error {{
+            background: var(--error-surface);
+            color: var(--error-color);
         }}
         section[data-testid="stSidebar"] {{
             background: var(--surface-color);
@@ -3237,9 +3385,9 @@ def render_business_plan_wizard(actual_sales: Optional[pd.DataFrame]) -> None:
         is_valid, errors, warnings = True, [], []
 
     for message in errors:
-        st.error(f"❗ {message}")
+        st.error(message)
     for message in warnings:
-        st.warning(f"⚠️ {message}")
+        st.warning(message)
 
     nav_cols = st.columns([1, 1, 1])
     if nav_cols[0].button("戻る", disabled=step_index == 0, key=f"plan_prev_{step_index}"):
@@ -3673,11 +3821,20 @@ def render_hero_section(
     """ヒーローエリアをマッキンゼー風に表示する。"""
 
     if alert_count > 0:
-        status_text = f"⚠️ 要確認: {alert_count}件"
-        status_class = "hero-badge hero-badge--alert"
+        status_label = f"要確認: {alert_count}件"
+        status_class = "hero-badge hero-badge--alert with-icon"
+        status_icon = build_ui_icon("!", tone="warning")
     else:
-        status_text = "✅ 主要指標は安定しています"
-        status_class = "hero-badge hero-badge--accent"
+        status_label = "主要指標は安定しています"
+        status_class = "hero-badge hero-badge--accent with-icon"
+        status_icon = build_ui_icon("OK", tone="success")
+
+    latest_icon = build_ui_icon("L", tone="accent")
+    period_icon = build_ui_icon("P", tone="accent")
+    records_icon = build_ui_icon("R", tone="accent")
+    executive_icon = build_ui_icon("EX", tone="accent")
+    store_icon = build_ui_icon("ST", tone="accent")
+    finance_icon = build_ui_icon("FA", tone="accent")
 
     st.markdown(
         """
@@ -3685,15 +3842,15 @@ def render_hero_section(
             <div class="hero-title">くらしいきいき社 計数管理ダッシュボード</div>
             <p class="hero-subtitle">高粗利商材のパフォーマンスを即座に把握し、迅速な意思決定を支援します。</p>
             <div class="hero-meta">
-                <span class="hero-badge">最新データ: {latest}</span>
-                <span class="hero-badge">表示期間: {period}</span>
-                <span class="hero-badge">対象レコード: {records}</span>
-                <span class="{status_class}">{status}</span>
+                <span class="hero-badge with-icon">{latest_icon}<span class="hero-badge__label">最新データ: {latest}</span></span>
+                <span class="hero-badge with-icon">{period_icon}<span class="hero-badge__label">表示期間: {period}</span></span>
+                <span class="hero-badge with-icon">{records_icon}<span class="hero-badge__label">対象レコード: {records}</span></span>
+                <span class="{status_class}">{status_icon}<span class="hero-badge__label">{status}</span></span>
             </div>
             <div class="hero-persona">
-                <span class="hero-chip">👤 社長: 売上・粗利を5秒確認</span>
-                <span class="hero-chip">🏪 店長: リピーターと在庫</span>
-                <span class="hero-chip">📊 経理: 資金繰りと育成</span>
+                <span class="hero-chip">{executive_icon}<span>社長: 売上・粗利を5秒確認</span></span>
+                <span class="hero-chip">{store_icon}<span>店長: リピーターと在庫</span></span>
+                <span class="hero-chip">{finance_icon}<span>経理: 資金繰りと育成</span></span>
             </div>
         </div>
         """.format(
@@ -3701,7 +3858,14 @@ def render_hero_section(
             period=html.escape(period_label or "-"),
             records=f"{record_count:,} 件",
             status_class=status_class,
-            status=html.escape(status_text),
+            status=html.escape(status_label),
+            status_icon=status_icon,
+            latest_icon=latest_icon,
+            period_icon=period_icon,
+            records_icon=records_icon,
+            executive_icon=executive_icon,
+            store_icon=store_icon,
+            finance_icon=finance_icon,
         ),
         unsafe_allow_html=True,
     )
@@ -3712,22 +3876,24 @@ def render_status_banner(alerts: Optional[List[str]]) -> None:
 
     if alerts:
         items = "".join(f"<li>{html.escape(msg)}</li>" for msg in alerts)
+        alert_icon = build_ui_icon("!", tone="warning")
         st.markdown(
             f"""
             <div class="alert-banner alert-banner--warning">
-                <div class="alert-banner__title">⚠️ 警告が検知されました</div>
+                <div class="alert-banner__title">{alert_icon}<span>警告が検知されました</span></div>
                 <ul>{items}</ul>
             </div>
             """,
             unsafe_allow_html=True,
         )
     else:
+        ok_icon = build_ui_icon("OK", tone="success")
         st.markdown(
             """
             <div class="alert-banner alert-banner--ok">
-                <div class="alert-banner__title">✅ 主要指標は設定した閾値内に収まっています。</div>
+                <div class="alert-banner__title">{ok_icon}<span>主要指標は設定した閾値内に収まっています。</span></div>
             </div>
-            """,
+            """.format(ok_icon=ok_icon),
             unsafe_allow_html=True,
         )
 
@@ -4045,8 +4211,16 @@ def render_kgi_cards(
             target_text = info.get("target_text")
             gap_value = info.get("gap_value")
             if target_text and target_text != "-":
-                prefix = "⚠️" if gap_value is not None and gap_value < 0 else "🎯"
-                st.caption(f"{prefix} 目標差 {target_text}")
+                icon_tone = "warning" if gap_value is not None and gap_value < 0 else "success"
+                icon_code = "!" if icon_tone == "warning" else "T"
+                icon_html = build_ui_icon(icon_code, tone=icon_tone)
+                st.markdown(
+                    "<div class='caption-with-icon'>{icon}<span>目標差 {text}</span></div>".format(
+                        icon=icon_html,
+                        text=html.escape(str(target_text)),
+                    ),
+                    unsafe_allow_html=True,
+                )
             else:
                 st.caption("目標差 -")
 
@@ -4076,19 +4250,21 @@ def render_dashboard_meta(
 ) -> None:
     """データのメタ情報とフィルタ状態をチップ状に表示する。"""
 
-    chips = [
-        ("📅 最新データ", latest_label or "-"),
-        ("🗓 表示期間", period_label or "-"),
-        ("💾 対象レコード", f"{record_count:,} 件"),
+    chips: List[Tuple[str, str, str, str]] = [
+        ("最新データ", latest_label or "-", "L", "accent"),
+        ("表示期間", period_label or "-", "P", "accent"),
+        ("対象レコード", f"{record_count:,} 件", "R", "accent"),
     ]
     if alert_count:
-        chips.append(("⚠️ アラート", f"{alert_count} 件"))
+        chips.append(("アラート", f"{alert_count} 件", "!", "warning"))
 
     chips_html = "".join(
-        "<span class='dashboard-meta__chip'>{label}: {value}</span>".format(
-            label=html.escape(label), value=html.escape(value)
+        "<span class='dashboard-meta__chip'>{icon}<span>{label}: {value}</span></span>".format(
+            icon=build_ui_icon(icon_code, tone=tone),
+            label=html.escape(label),
+            value=html.escape(value),
         )
-        for label, value in chips
+        for label, value, icon_code, tone in chips
     )
     st.markdown(f"<div class='dashboard-meta'>{chips_html}</div>", unsafe_allow_html=True)
 
@@ -4105,7 +4281,7 @@ def render_dashboard_meta(
     if store_selection:
         filter_entries.append(
             {
-                "label": "🏬 店舗",
+                "label": "店舗",
                 "value": str(store_selection),
                 "filter": "store",
                 "help": "店舗フィルタをクリア",
@@ -4116,7 +4292,7 @@ def render_dashboard_meta(
         formatted = _format_list(channel_selection)
         filter_entries.append(
             {
-                "label": "🛒 チャネル",
+                "label": "チャネル",
                 "value": formatted,
                 "filter": "channels",
                 "help": "チャネルの選択をリセット",
@@ -4127,7 +4303,7 @@ def render_dashboard_meta(
         formatted = _format_list(category_selection)
         filter_entries.append(
             {
-                "label": "🏷 カテゴリ",
+                "label": "カテゴリ",
                 "value": formatted,
                 "filter": "categories",
                 "help": "カテゴリの選択をリセット",
@@ -5817,6 +5993,9 @@ def render_data_status_section(
 
     cards: List[str] = []
 
+    def _status_markup(label: str, tone: str, code: str) -> str:
+        return f"{build_ui_icon(code, tone=tone)}<span>{html.escape(label)}</span>"
+
     if merged_df is not None and not merged_df.empty:
         channel_summary = (
             merged_df.groupby("channel")
@@ -5840,12 +6019,13 @@ def render_data_status_section(
                     <div class="data-status-card__title">{title}</div>
                     <div class="data-status-card__meta">{meta}</div>
                     <div class="data-status-card__body">{body}</div>
-                    <div class="data-status-card__status data-status-card__status--ok">✅ 正常</div>
+                    <div class="data-status-card__status data-status-card__status--ok">{status}</div>
                 </div>
                 """.format(
                     title=html.escape(str(row["channel"])),
                     meta=html.escape(meta),
                     body=html.escape(body),
+                    status=_status_markup("正常", "success", "OK"),
                 )
             )
     else:
@@ -5855,9 +6035,9 @@ def render_data_status_section(
                 <div class="data-status-card__title">売上データ</div>
                 <div class="data-status-card__meta">-</div>
                 <div class="data-status-card__body">売上ファイルが未読み込みです。</div>
-                <div class="data-status-card__status data-status-card__status--warning">⚠️ 未取込</div>
+                <div class="data-status-card__status data-status-card__status--warning">{status}</div>
             </div>
-            """
+            """.format(status=_status_markup("未取込", "warning", "!"))
         )
 
     cost_loaded = cost_df is not None and not cost_df.empty
@@ -5866,24 +6046,28 @@ def render_data_status_section(
         if cost_loaded
         else "data-status-card__status data-status-card__status--warning"
     )
-    cost_status_label = "✅ 正常" if cost_loaded else "⚠️ 未登録"
+    cost_status_label = (
+        _status_markup("正常", "success", "OK")
+        if cost_loaded
+        else _status_markup("未登録", "warning", "!")
+    )
     cost_body = (
         f"登録済みアイテム: {len(cost_df):,}件" if cost_loaded else "原価率データが未設定です。"
     )
     cards.append(
         """
-        <div class="data-status-card">
-            <div class="data-status-card__title">原価率マスタ</div>
-            <div class="data-status-card__meta">-</div>
-            <div class="data-status-card__body">{body}</div>
-            <div class="{status_class}">{status}</div>
-        </div>
-        """.format(
-            body=html.escape(cost_body),
-            status_class=cost_status_class,
-            status=html.escape(cost_status_label),
+            <div class="data-status-card">
+                <div class="data-status-card__title">原価率マスタ</div>
+                <div class="data-status-card__meta">-</div>
+                <div class="data-status-card__body">{body}</div>
+                <div class="{status_class}">{status}</div>
+            </div>
+            """.format(
+                body=html.escape(cost_body),
+                status_class=cost_status_class,
+                status=cost_status_label,
+            )
         )
-    )
 
     sub_loaded = subscription_df is not None and not subscription_df.empty
     sub_status_class = (
@@ -5891,24 +6075,28 @@ def render_data_status_section(
         if sub_loaded
         else "data-status-card__status data-status-card__status--warning"
     )
-    sub_status_label = "✅ 正常" if sub_loaded else "⚠️ 未登録"
+    sub_status_label = (
+        _status_markup("正常", "success", "OK")
+        if sub_loaded
+        else _status_markup("未登録", "warning", "!")
+    )
     sub_body = (
         f"月次レコード: {len(subscription_df):,}件" if sub_loaded else "サブスクKPIが未入力です。"
     )
     cards.append(
         """
-        <div class="data-status-card">
-            <div class="data-status-card__title">定期購買 / KPIデータ</div>
-            <div class="data-status-card__meta">-</div>
-            <div class="data-status-card__body">{body}</div>
-            <div class="{status_class}">{status}</div>
-        </div>
-        """.format(
-            body=html.escape(sub_body),
-            status_class=sub_status_class,
-            status=html.escape(sub_status_label),
+            <div class="data-status-card">
+                <div class="data-status-card__title">定期購買 / KPIデータ</div>
+                <div class="data-status-card__meta">-</div>
+                <div class="data-status-card__body">{body}</div>
+                <div class="{status_class}">{status}</div>
+            </div>
+            """.format(
+                body=html.escape(sub_body),
+                status_class=sub_status_class,
+                status=sub_status_label,
+            )
         )
-    )
 
     if automated_sales_data:
         api_last_fetched = st.session_state.get("api_last_fetched", {})
@@ -5921,14 +6109,11 @@ def render_data_status_section(
             last_fetch = api_last_fetched.get(channel)
             report = api_reports.get(channel)
             status_label = "正常"
-            status_icon = "✅"
             if report and getattr(report, "has_errors", lambda: False)():
                 status_label = "エラー"
-                status_icon = "⛔"
                 error_count += 1
             elif report and getattr(report, "has_warnings", lambda: False)():
                 status_label = "警告あり"
-                status_icon = "⚠️"
                 warning_count += 1
             else:
                 ok_count += 1
@@ -5936,13 +6121,19 @@ def render_data_status_section(
             api_lines.append(f"{channel}: {status_label} / 取得 {timestamp}")
         if error_count:
             api_status_class = "data-status-card__status data-status-card__status--error"
-            api_status_label = f"⛔ エラー {error_count}件"
+            api_status_label = _status_markup(
+                f"エラー {error_count}件", "error", "×"
+            )
         elif warning_count:
             api_status_class = "data-status-card__status data-status-card__status--warning"
-            api_status_label = f"⚠️ 警告 {warning_count}件"
+            api_status_label = _status_markup(
+                f"警告 {warning_count}件", "warning", "!"
+            )
         else:
             api_status_class = "data-status-card__status data-status-card__status--ok"
-            api_status_label = f"✅ 正常 {ok_count}件"
+            api_status_label = _status_markup(
+                f"正常 {ok_count}件", "success", "OK"
+            )
 
         footnote_html = ""
         if api_lines:
@@ -6314,7 +6505,7 @@ def render_scenario_analysis_section(
         """
         <div class="surface-card" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;">
             <div>
-                <div style="font-size:1.1rem;font-weight:700;">🧭 戦略意思決定センター</div>
+                <div style="font-size:1.1rem;font-weight:700;" class="with-icon with-icon--tight">{icon}<span>戦略意思決定センター</span></div>
                 <div style="color:var(--muted-text-color);font-size:0.9rem;">Scenario Intelligence Hub</div>
             </div>
             <div style="display:flex;gap:0.4rem;">
@@ -6322,7 +6513,7 @@ def render_scenario_analysis_section(
                 <a href="https://twitter.com" style="text-decoration:none;border-radius:999px;padding:0.35rem 0.75rem;border:1px solid rgba(255,255,255,0.25);color:var(--text-color);">X</a>
             </div>
         </div>
-        """,
+        """.format(icon=build_ui_icon("SC", tone="accent")),
         unsafe_allow_html=True,
     )
 
@@ -6457,13 +6648,20 @@ def render_scenario_analysis_section(
             st.session_state["phase2_swot"] = swot
             swot_cols = st.columns(4)
             swot_titles = [
-                ("Strengths", "strengths", "🟢"),
-                ("Weaknesses", "weaknesses", "🟠"),
-                ("Opportunities", "opportunities", "🔵"),
-                ("Threats", "threats", "🔴"),
+                ("Strengths", "strengths", "S", "success"),
+                ("Weaknesses", "weaknesses", "W", "warning"),
+                ("Opportunities", "opportunities", "O", "accent"),
+                ("Threats", "threats", "T", "error"),
             ]
-            for col, (title, key, icon) in zip(swot_cols, swot_titles):
-                col.markdown(f"#### {icon} {title}")
+            for col, (title, key, code, tone) in zip(swot_cols, swot_titles):
+                icon_html = build_ui_icon(code, tone=tone)
+                col.markdown(
+                    "#### <span class='with-icon with-icon--tight'>{icon}<span>{title}</span></span>".format(
+                        icon=icon_html,
+                        title=html.escape(title),
+                    ),
+                    unsafe_allow_html=True,
+                )
                 for item in swot.get(key, []):
                     col.markdown(f"- {item}")
 
@@ -7061,9 +7259,16 @@ def main() -> None:
                     status_level = "warning"
                 else:
                     status_level = "ok"
-                icon, status_label = STATUS_PILL_DETAILS.get(status_level, ("ℹ️", "情報"))
+                icon_code, tone, status_label = STATUS_PILL_DETAILS.get(
+                    status_level, ("i", "muted", "情報")
+                )
+                status_icon = build_ui_icon(icon_code, tone=tone)
                 st.markdown(
-                    f"<div class='status-pill status-pill--{status_level}'>{icon} 状態: {status_label}</div>",
+                    "<div class='status-pill status-pill--{cls}'>{icon}<span>状態: {label}</span></div>".format(
+                        cls=status_level,
+                        icon=status_icon,
+                        label=html.escape(status_label),
+                    ),
                     unsafe_allow_html=True,
                 )
                 st.markdown(
@@ -7562,12 +7767,12 @@ def main() -> None:
             render_active_kpi_details(kpi_period_summary, kpi_metrics)
 
             primary_tab_entries = [
-                ("売上", "📈"),
-                ("粗利", "💹"),
-                ("在庫", "📦"),
-                ("資金", "💰"),
-                ("KPI", "📈"),
-                ("データ管理", "🗂"),
+                ("売上", "SL"),
+                ("粗利", "GR"),
+                ("在庫", "IV"),
+                ("資金", "CS"),
+                ("KPI", "KP"),
+                ("データ管理", "DT"),
             ]
             icon_lookup = {label: icon for label, icon in primary_tab_entries}
             tab_labels = [label for label, _ in primary_tab_entries]
@@ -7576,7 +7781,7 @@ def main() -> None:
                 tab_labels,
                 default=st.session_state.get("primary_section_tab", tab_labels[0]),
                 help_text="前回開いていたタブを記憶し、次回アクセス時も同じ画面から再開できます。",
-                format_func=lambda value: f"{icon_lookup[value]} {value}",
+                format_func=lambda value: f"[{icon_lookup[value]}] {value}",
             )
 
             if selected_primary_tab == "売上":
