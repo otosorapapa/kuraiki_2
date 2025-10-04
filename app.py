@@ -240,6 +240,34 @@ def update_state_from_widget(state_key: str) -> None:
         st.session_state[state_key] = _clone_state_value(st.session_state[widget_key])
 
 
+def add_manual_filter_value(
+    filter_state_key: str,
+    manual_state_key: str,
+    input_widget_key: str,
+) -> None:
+    """テキスト入力されたフィルタ値を永続化し、選択中の値に追加する。"""
+
+    raw_value = st.session_state.get(input_widget_key)
+    if raw_value is None:
+        return
+
+    value = str(raw_value).strip()
+    st.session_state[input_widget_key] = ""
+    if not value:
+        return
+
+    manual_values = list(st.session_state.get(manual_state_key, []))
+    if value not in manual_values:
+        manual_values.append(value)
+        st.session_state[manual_state_key] = manual_values
+
+    current_selection = list(st.session_state.get(filter_state_key, []))
+    if value not in current_selection:
+        current_selection.append(value)
+    set_state_and_widget(filter_state_key, current_selection)
+    trigger_rerun()
+
+
 STATE_MESSAGES: Dict[str, Dict[str, Any]] = {
     "data_unloaded": {
         "type": "warning",
@@ -8112,25 +8140,61 @@ def main() -> None:
     set_state_and_widget(period_state_key, normalized_period_state)
     period_widget_key = widget_key_for(period_state_key)
 
-    available_channels = sorted(store_sales_df["channel"].dropna().unique().tolist())
+    channel_series = store_sales_df["channel"].dropna()
+    if not channel_series.empty:
+        channel_counts = channel_series.value_counts()
+        top_channel_options = channel_counts.head(CATEGORY_SUGGESTION_LIMIT).index.tolist()
+    else:
+        top_channel_options = []
     channel_state_key = FILTER_STATE_KEYS["channels"]
+    manual_channel_state_key = f"{channel_state_key}_manual_entries"
+    manual_channel_entries: List[str] = []
+    for value in st.session_state.get(manual_channel_state_key, []):
+        normalized = str(value).strip()
+        if not normalized or normalized in manual_channel_entries:
+            continue
+        manual_channel_entries.append(normalized)
+    st.session_state[manual_channel_state_key] = manual_channel_entries
+    previous_channel_selection = list(st.session_state.get(channel_state_key, []))
+    available_channels = list(
+        dict.fromkeys(top_channel_options + manual_channel_entries + previous_channel_selection)
+    )
     preserved_channels = [
-        ch for ch in st.session_state.get(channel_state_key, []) if ch in available_channels
+        ch for ch in previous_channel_selection if ch in available_channels
     ]
     if available_channels and not preserved_channels:
         preserved_channels = available_channels
     set_state_and_widget(channel_state_key, preserved_channels)
     channel_widget_key = widget_key_for(channel_state_key)
+    channel_manual_input_key = widget_key_for(f"{channel_state_key}_manual_input")
 
-    available_categories = sorted(store_sales_df["category"].dropna().unique().tolist())
+    category_series = store_sales_df["category"].dropna()
+    if not category_series.empty:
+        category_counts = category_series.value_counts()
+        top_category_options = category_counts.head(CATEGORY_SUGGESTION_LIMIT).index.tolist()
+    else:
+        top_category_options = []
     category_state_key = FILTER_STATE_KEYS["categories"]
+    manual_category_state_key = f"{category_state_key}_manual_entries"
+    manual_category_entries: List[str] = []
+    for value in st.session_state.get(manual_category_state_key, []):
+        normalized = str(value).strip()
+        if not normalized or normalized in manual_category_entries:
+            continue
+        manual_category_entries.append(normalized)
+    st.session_state[manual_category_state_key] = manual_category_entries
+    previous_category_selection = list(st.session_state.get(category_state_key, []))
+    available_categories = list(
+        dict.fromkeys(top_category_options + manual_category_entries + previous_category_selection)
+    )
     preserved_categories = [
-        cat for cat in st.session_state.get(category_state_key, []) if cat in available_categories
+        cat for cat in previous_category_selection if cat in available_categories
     ]
     if available_categories and not preserved_categories:
         preserved_categories = available_categories
     set_state_and_widget(category_state_key, preserved_categories)
     category_widget_key = widget_key_for(category_state_key)
+    category_manual_input_key = widget_key_for(f"{category_state_key}_manual_input")
 
     freq_state_key = FILTER_STATE_KEYS["freq"]
     current_freq_label = st.session_state.get(freq_state_key, default_freq_label)
@@ -8176,6 +8240,14 @@ def main() -> None:
         on_change=_apply_filter_form,
         args=(channel_state_key,),
     )
+    st.sidebar.text_input(
+        "その他チャネルを追加",
+        key=channel_manual_input_key,
+        placeholder="チャネル名を入力",
+        help="候補一覧にないチャネル名を入力して追加できます。",
+        on_change=add_manual_filter_value,
+        args=(channel_state_key, manual_channel_state_key, channel_manual_input_key),
+    )
     st.sidebar.multiselect(
         "表示するカテゴリ",
         options=available_categories,
@@ -8184,6 +8256,14 @@ def main() -> None:
         help="カテゴリ選択は粗利・在庫の分析タブにも共有されます。",
         on_change=_apply_filter_form,
         args=(category_state_key,),
+    )
+    st.sidebar.text_input(
+        "その他カテゴリを追加",
+        key=category_manual_input_key,
+        placeholder="カテゴリ名を入力",
+        help="候補一覧にないカテゴリ名を入力して追加できます。",
+        on_change=add_manual_filter_value,
+        args=(category_state_key, manual_category_state_key, category_manual_input_key),
     )
     st.sidebar.selectbox(
         "ダッシュボード表示粒度",
