@@ -32,6 +32,10 @@ from data_processing import (
     create_default_cashflow_plan,
     fetch_sales_from_endpoint,
     forecast_cashflow,
+    train_forecast_model,
+    predict_sales_forecast,
+    apply_forecast_to_cashflow,
+    estimate_forecast_savings,
     generate_sample_cost_data,
     generate_sample_sales_data,
     generate_sample_subscription_data,
@@ -560,6 +564,8 @@ INVENTORY_SERIES_COLOR = "#1D4ED8"
 CASH_SERIES_COLOR = ACCENT_COLOR
 YOY_SERIES_COLOR = SECONDARY_COLOR
 BASELINE_SERIES_COLOR = "#94A3B8"
+FORECAST_SERIES_COLOR = "#0EA5E9"
+FORECAST_BAND_COLOR = _rgba_from_hex(FORECAST_SERIES_COLOR, 0.18)
 
 CF_COLOR_MAPPING = {
     "営業CF": SALES_SERIES_COLOR,
@@ -5497,19 +5503,249 @@ def render_cash_tab(
     cash_plan: pd.DataFrame,
     cash_forecast: pd.DataFrame,
     starting_cash: float,
+    monthly_summary: pd.DataFrame,
 ) -> None:
     """資金タブのグラフと明細を描画する。"""
 
-    if cash_forecast is not None and not cash_forecast.empty:
+    base_cash_plan = cash_plan.copy() if isinstance(cash_plan, pd.DataFrame) else pd.DataFrame()
+    base_cash_forecast = cash_forecast.copy() if isinstance(cash_forecast, pd.DataFrame) else pd.DataFrame()
+    if (base_cash_forecast is None or base_cash_forecast.empty) and not base_cash_plan.empty:
+        base_cash_forecast = forecast_cashflow(base_cash_plan, starting_cash)
+
+    active_cash_plan = base_cash_plan.copy()
+    active_cash_forecast = base_cash_forecast.copy()
+    forecast_df = pd.DataFrame()
+    forecast_summary_df = pd.DataFrame()
+    savings_summary_df = pd.DataFrame()
+    updated_cash_plan: Optional[pd.DataFrame] = None
+    updated_cash_forecast: Optional[pd.DataFrame] = None
+    artifact = None
+
+    st.markdown("<div class='chart-section'>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='chart-section__header'><div class='chart-section__title'>AI売上予測と資金インパクト</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    if monthly_summary is None or monthly_summary.empty:
+        st.info("売上データが不足しているため機械学習予測を実行できません。直近数ヶ月分の売上データをアップロードしてください。")
+    else:
+        model_options = [("arima", "ARIMA (統計モデル)"), ("lstm", "LSTM (ニューラルネット)")]
+        default_model = st.session_state.get("cash_forecast_model_type", "arima")
+        default_index = next((idx for idx, opt in enumerate(model_options) if opt[0] == default_model), 0)
+        controls = st.columns([2, 1, 1])
+        selected_model = controls[0].selectbox(
+            "モデルタイプ",
+            options=model_options,
+            index=default_index,
+            format_func=lambda opt: opt[1],
+            key="cash_forecast_model_selector",
+            help="統計的なARIMAモデルと深層学習LSTMモデルから選択できます。",
+        )
+        model_type = selected_model[0]
+        st.session_state["cash_forecast_model_type"] = model_type
+
+        default_horizon = int(st.session_state.get("cash_forecast_horizon_value", min(6, max(3, len(base_cash_plan) or 6))))
+        horizon = controls[1].slider(
+            "予測期間 (月)",
+            min_value=3,
+            max_value=12,
+            value=default_horizon,
+            step=1,
+            key="cash_forecast_horizon",
+        )
+        st.session_state["cash_forecast_horizon_value"] = horizon
+
+        default_confidence = float(st.session_state.get("cash_forecast_confidence_value", 0.90))
+        confidence = controls[2].slider(
+            "信頼水準",
+            min_value=0.80,
+            max_value=0.99,
+            value=default_confidence,
+            step=0.01,
+            key="cash_forecast_confidence",
+        )
+        st.session_state["cash_forecast_confidence_value"] = confidence
+
+        window_size = min(12, max(6, len(monthly_summary) - 1))
+        if model_type == "lstm":
+            max_window = max(6, min(24, len(monthly_summary) - 1))
+            window_size = controls[0].slider(
+                "学習ウィンドウ (月)",
+                min_value=6,
+                max_value=max_window,
+                value=min(window_size, max_window),
+                step=1,
+                key="cash_forecast_window",
+                help="LSTMが過去何ヶ月分のデータを学習に使うかを指定します。",
+            )
+
+        try:
+            with st.spinner("売上予測を更新しています..."):
+                artifact = train_forecast_model(
+                    monthly_summary,
+                    model_type=model_type,
+                    freq="M",
+                    window_size=window_size,
+                    lstm_params={"units": 32, "epochs": 120, "batch_size": 8},
+                )
+                forecast_df = predict_sales_forecast(
+                    artifact,
+                    periods=horizon,
+                    confidence_level=confidence,
+                )
+        except Exception as exc:  # pragma: no cover - UI通知用
+            st.warning(f"売上予測の計算に失敗しました: {exc}")
+        else:
+            history = monthly_summary[["order_month", "sales_amount"]].copy()
+            history = history.tail(max(24, horizon + 3))
+            history["period_start"] = history["order_month"].dt.to_timestamp()
+
+            forecast_chart_df = forecast_df.copy()
+            forecast_chart_df["period_start"] = forecast_chart_df["month"].dt.to_timestamp()
+            forecast_chart_df["lower_ci"] = forecast_chart_df["lower_ci"].clip(lower=0.0)
+            forecast_chart_df["upper_ci"] = forecast_chart_df["upper_ci"].clip(lower=0.0)
+
+            history_line = alt.Chart(history).mark_line(
+                color=SALES_SERIES_COLOR, point=alt.OverlayMarkDef(size=60, filled=True)
+            ).encode(
+                x=alt.X("period_start:T", title="期間開始", axis=alt.Axis(format="%Y-%m", labelOverlap=True)),
+                y=alt.Y("sales_amount:Q", title="売上高 (円)", axis=alt.Axis(format=",.0f")),
+                tooltip=[
+                    alt.Tooltip("order_month:N", title="月"),
+                    alt.Tooltip("sales_amount:Q", title="実績売上", format=",.0f"),
+                ],
+            )
+
+            forecast_band = alt.Chart(forecast_chart_df).mark_area(
+                opacity=0.2, color=FORECAST_SERIES_COLOR
+            ).encode(
+                x=alt.X("period_start:T", title="期間開始", axis=alt.Axis(format="%Y-%m", labelOverlap=True)),
+                y=alt.Y("lower_ci:Q", title=""),
+                y2="upper_ci:Q",
+                tooltip=[
+                    alt.Tooltip("month:N", title="月"),
+                    alt.Tooltip("lower_ci:Q", title="下限", format=",.0f"),
+                    alt.Tooltip("upper_ci:Q", title="上限", format=",.0f"),
+                ],
+            )
+
+            forecast_line = alt.Chart(forecast_chart_df).mark_line(
+                color=FORECAST_SERIES_COLOR, point=alt.OverlayMarkDef(size=60, filled=True)
+            ).encode(
+                x=alt.X("period_start:T", title="期間開始", axis=alt.Axis(format="%Y-%m", labelOverlap=True)),
+                y=alt.Y("forecast:Q", title="売上予測 (円)", axis=alt.Axis(format=",.0f")),
+                tooltip=[
+                    alt.Tooltip("month:N", title="月"),
+                    alt.Tooltip("forecast:Q", title="予測売上", format=",.0f"),
+                    alt.Tooltip("lower_ci:Q", title="下限", format=",.0f"),
+                    alt.Tooltip("upper_ci:Q", title="上限", format=",.0f"),
+                ],
+            )
+
+            forecast_chart = (
+                alt.layer(history_line, forecast_band, forecast_line)
+                .resolve_scale(color="independent")
+                .properties(height=320)
+            )
+            st.altair_chart(apply_altair_theme(forecast_chart), use_container_width=True)
+
+            if not forecast_df.empty:
+                last_row = forecast_df.iloc[-1]
+                st.caption(
+                    f"{len(forecast_df)}ヶ月先の予測売上は{last_row['forecast']:,.0f}円 (信頼区間 {last_row['lower_ci']:,.0f}〜{last_row['upper_ci']:,.0f}円) を想定しています。"
+                )
+
+            metric_cols = st.columns(3)
+            baseline_mape = artifact.metrics.get("baseline_mape") if artifact else None
+            model_mape = artifact.metrics.get("model_mape") if artifact else None
+            improvement = artifact.metrics.get("mape_improvement") if artifact else None
+            if baseline_mape is not None and not np.isnan(baseline_mape):
+                metric_cols[0].metric("ベースラインMAPE", f"{baseline_mape:.1%}")
+            if model_mape is not None and not np.isnan(model_mape):
+                metric_cols[1].metric("モデルMAPE", f"{model_mape:.1%}")
+            if improvement is not None and not np.isnan(improvement):
+                metric_cols[2].metric("誤差改善", f"{improvement:.1%}")
+
+            if not base_cash_plan.empty:
+                updated_cash_plan, forecast_summary_df = apply_forecast_to_cashflow(
+                    base_cash_plan, forecast_df, monthly_summary
+                )
+                updated_cash_forecast = forecast_cashflow(updated_cash_plan, starting_cash)
+                savings_summary_df = estimate_forecast_savings(artifact, monthly_summary)
+                apply_toggle = st.toggle(
+                    "売上予測を資金計画に反映する",
+                    value=True,
+                    key="cash_forecast_apply_toggle",
+                )
+                if apply_toggle:
+                    active_cash_plan = updated_cash_plan
+                    active_cash_forecast = updated_cash_forecast
+                else:
+                    active_cash_plan = base_cash_plan
+                    active_cash_forecast = base_cash_forecast
+
+            detail_cols = st.columns(2)
+            forecast_display = forecast_df.copy()
+            if not forecast_display.empty:
+                forecast_display["予測月"] = forecast_display["month"].astype(str)
+                for column in ["forecast", "lower_ci", "upper_ci"]:
+                    forecast_display[column] = forecast_display[column].map(
+                        lambda v: f"{v:,.0f}" if pd.notna(v) else "-"
+                    )
+                detail_cols[0].dataframe(
+                    forecast_display.rename(
+                        columns={"forecast": "予測売上", "lower_ci": "下限", "upper_ci": "上限"}
+                    )[["予測月", "予測売上", "下限", "上限"]],
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+            def _format_summary_value(label: str, value: Any) -> str:
+                if value is None or pd.isna(value):
+                    return "-"
+                if "MAPE" in label or "率" in label:
+                    return f"{float(value):.1%}"
+                return f"{float(value):,.0f}"
+
+            summary_container = detail_cols[1]
+            if not forecast_summary_df.empty:
+                summary_container.markdown("**キャッシュフロー影響**")
+                formatted_summary = forecast_summary_df.copy()
+                for column in ["現状", "予測適用", "差分"]:
+                    formatted_summary[column] = formatted_summary.apply(
+                        lambda row: _format_summary_value(row["指標"], row[column]), axis=1
+                    )
+                summary_container.dataframe(
+                    formatted_summary,
+                    hide_index=True,
+                    use_container_width=True,
+                )
+            if not savings_summary_df.empty:
+                summary_container.markdown("**投資効果シミュレーション**")
+                formatted_savings = savings_summary_df.copy()
+                for column in ["現状", "予測適用", "差分"]:
+                    formatted_savings[column] = formatted_savings.apply(
+                        lambda row: _format_summary_value(row["指標"], row[column]), axis=1
+                    )
+                summary_container.dataframe(
+                    formatted_savings,
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if active_cash_forecast is not None and not active_cash_forecast.empty:
         st.markdown("<div class='chart-section'>", unsafe_allow_html=True)
         st.markdown(
             "<div class='chart-section__header'><div class='chart-section__title'>キャッシュ残高推移</div></div>",
             unsafe_allow_html=True,
         )
-        forecast_df = cash_forecast.copy()
-        forecast_df["period_start"] = forecast_df["month"].dt.to_timestamp()
-        forecast_df["period_label"] = forecast_df["month"].astype(str)
-        cash_line = alt.Chart(forecast_df).mark_line(
+        forecast_df_plot = active_cash_forecast.copy()
+        forecast_df_plot["period_start"] = forecast_df_plot["month"].dt.to_timestamp()
+        forecast_df_plot["period_label"] = forecast_df_plot["month"].astype(str)
+        cash_line = alt.Chart(forecast_df_plot).mark_line(
             color=CASH_SERIES_COLOR, point=alt.OverlayMarkDef(size=60, filled=True)
         ).encode(
             x=alt.X("period_start:T", title="期間開始", axis=alt.Axis(format="%Y-%m", labelOverlap=True)),
@@ -5541,7 +5777,7 @@ def render_cash_tab(
         )
         st.altair_chart(apply_altair_theme(cash_chart), use_container_width=True)
 
-        latest_row = forecast_df.iloc[-1]
+        latest_row = forecast_df_plot.iloc[-1]
         latest_cash = float(latest_row.get("cash_balance", starting_cash))
         net_cf = latest_row.get("net_cf")
         net_cf_text = f"{float(net_cf):,.0f}円" if pd.notna(net_cf) else "-"
@@ -5556,13 +5792,13 @@ def render_cash_tab(
     else:
         st.info("資金繰り予測を表示するデータが不足しています。")
 
-    if cash_plan is not None and not cash_plan.empty:
+    if active_cash_plan is not None and not active_cash_plan.empty:
         st.markdown("<div class='chart-section'>", unsafe_allow_html=True)
         st.markdown(
             "<div class='chart-section__header'><div class='chart-section__title'>キャッシュフロー内訳</div></div>",
             unsafe_allow_html=True,
         )
-        plan_df = cash_plan.copy()
+        plan_df = active_cash_plan.copy()
         plan_df["period_start"] = plan_df["month"].dt.to_timestamp()
         melted = plan_df.melt(
             id_vars=["period_start"],
@@ -5602,10 +5838,10 @@ def render_cash_tab(
         st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("キャッシュフロー明細", expanded=False):
-        if cash_plan is None or cash_plan.empty:
+        if active_cash_plan is None or active_cash_plan.empty:
             st.info("キャッシュフロー計画データがありません。")
         else:
-            table_df = cash_plan.copy()
+            table_df = active_cash_plan.copy()
             table_df["month_label"] = table_df["month"].astype(str)
             export_df = table_df[[
                 "month_label",
@@ -5614,8 +5850,8 @@ def render_cash_tab(
                 "financing_cf",
                 "loan_repayment",
             ]].copy()
-            if cash_forecast is not None and not cash_forecast.empty:
-                forecast_export = cash_forecast.copy()
+            if active_cash_forecast is not None and not active_cash_forecast.empty:
+                forecast_export = active_cash_forecast.copy()
                 forecast_export["month_label"] = forecast_export["month"].astype(str)
                 export_df = export_df.merge(
                     forecast_export[["month_label", "net_cf", "cash_balance"]],
@@ -7592,7 +7828,12 @@ def main() -> None:
             elif selected_primary_tab == "在庫":
                 render_inventory_tab(merged_df, kpi_period_summary, selected_kpi_row)
             elif selected_primary_tab == "資金":
-                render_cash_tab(default_cash_plan, default_cash_forecast, starting_cash)
+                render_cash_tab(
+                    default_cash_plan,
+                    default_cash_forecast,
+                    starting_cash,
+                    monthly_summary,
+                )
             elif selected_primary_tab == "KPI":
                 render_kpi_overview_tab(kpi_period_summary)
             else:
