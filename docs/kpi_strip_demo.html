@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KPIストリップ コンポーネント例</title>
+  <style>
+    :root {
+      --primary-color: #0f172a;
+      --secondary-color: #475569;
+      --accent-color: #2563eb;
+      --surface-color: #ffffff;
+      --background-color: #f1f5f9;
+      --text-color: #111827;
+      --muted-text-color: var(--secondary-color);
+      --success-color: #15803d;
+      --warning-color: #c2410c;
+      --error-color: #b91c1c;
+      --success-surface: rgba(21, 128, 61, 0.12);
+      --warning-surface: rgba(194, 65, 12, 0.128);
+      --error-surface: rgba(185, 28, 28, 0.128);
+      --font-family: 'Inter', 'Inter var', 'Source Sans 3', -apple-system,
+        BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'Noto Sans JP',
+        sans-serif;
+      --numeric-font-family: 'Inter Tight', 'Inter', 'Inter var', 'Source Sans 3',
+        -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial,
+        'Noto Sans JP', sans-serif;
+      --spacing-xs: 8px;
+      --spacing-sm: 12px;
+      --spacing-md: 16px;
+      --spacing-lg: 24px;
+      --spacing-xl: 32px;
+      --radius-card: 12px;
+      --radius-chip: 999px;
+      --shadow-sm: 0 8px 16px rgba(15, 23, 42, 0.08);
+      --shadow-md: 0 12px 24px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 24px 48px rgba(15, 23, 42, 0.16);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--font-family);
+      background: var(--background-color);
+      color: var(--text-color);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: var(--spacing-xl) var(--spacing-lg);
+    }
+
+    main {
+      width: min(960px, 100%);
+      background: var(--surface-color);
+      border-radius: 18px;
+      box-shadow: var(--shadow-lg);
+      padding: calc(var(--spacing-xl) * 0.75);
+      border: 1px solid rgba(11, 31, 59, 0.08);
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: var(--spacing-lg);
+      color: var(--primary-color);
+    }
+
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-lg);
+    }
+
+    .kpi-strip__card {
+      background: var(--surface-color);
+      border-radius: var(--radius-card);
+      padding: 1.25rem 1.5rem;
+      border: 1px solid rgba(11, 31, 59, 0.08);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .kpi-strip__label {
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted-text-color);
+      margin-bottom: var(--spacing-xs);
+    }
+
+    .kpi-strip__value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--primary-color);
+      font-family: var(--numeric-font-family);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kpi-strip__delta {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted-text-color);
+      margin-top: 0.35rem;
+    }
+
+    .kpi-strip__delta--up {
+      color: var(--success-color);
+    }
+
+    .kpi-strip__delta--down {
+      color: var(--error-color);
+    }
+
+    .caption {
+      font-size: 0.85rem;
+      color: var(--muted-text-color);
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>主要KPIカードのレンダリング例</h1>
+    <div class="kpi-strip">
+      <div class="kpi-strip__card">
+        <div class="kpi-strip__label">LTV</div>
+        <div class="kpi-strip__value">71,436円</div>
+        <div class="kpi-strip__delta kpi-strip__delta--up">前月比 ▲ +6997 円</div>
+      </div>
+      <div class="kpi-strip__card">
+        <div class="kpi-strip__label">ARPU</div>
+        <div class="kpi-strip__value">808円</div>
+        <div class="kpi-strip__delta kpi-strip__delta--down">前月比 ▼ -1669 円</div>
+      </div>
+      <div class="kpi-strip__card">
+        <div class="kpi-strip__label">解約率</div>
+        <div class="kpi-strip__value">2.1%</div>
+        <div class="kpi-strip__delta kpi-strip__delta--down">前月比 ▼ -0.6 pt</div>
+      </div>
+    </div>
+    <p class="caption">※ サンプルデータを用いたスタイル確認用モック。</p>
+  </main>
+</body>
+</html>
