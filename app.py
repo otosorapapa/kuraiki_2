@@ -1247,13 +1247,39 @@ def inject_mckinsey_style(
         .onboarding-wizard--sidebar {{
             margin-bottom: 0;
         }}
+        .onboarding-wizard__summary {{
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            cursor: pointer;
+            margin: 0 0 var(--spacing-xs);
+        }}
+        .onboarding-wizard__summary::-webkit-details-marker {{
+            display: none;
+        }}
         .onboarding-wizard__title {{
             font-size: 0.95rem;
             font-weight: 700;
-            margin-bottom: var(--spacing-sm);
         }}
-        .onboarding-wizard--sidebar .onboarding-wizard__title {{
-            margin-bottom: var(--spacing-xs);
+        .onboarding-wizard__chevron {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.4rem;
+            height: 1.4rem;
+            border-radius: 50%;
+            background: rgba(var(--primary-rgb),0.12);
+            color: var(--primary-color);
+            font-size: 0.75rem;
+            transition: transform 0.2s ease;
+        }}
+        .onboarding-wizard:not([open]) .onboarding-wizard__chevron {{
+            transform: rotate(-90deg);
+        }}
+        .onboarding-wizard[open] .onboarding-wizard__chevron {{
+            transform: rotate(0deg);
         }}
         section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {{
             width: 100%;
@@ -1561,8 +1587,11 @@ def render_onboarding_wizard(
 
     wizard_box.markdown(
         f"""
-        <div class="onboarding-wizard onboarding-wizard--sidebar">
-            <div class="onboarding-wizard__title">セットアップ手順</div>
+        <details class="onboarding-wizard onboarding-wizard--sidebar" open>
+            <summary class="onboarding-wizard__summary">
+                <span class="onboarding-wizard__title">セットアップ手順</span>
+                <span class="onboarding-wizard__chevron">⌄</span>
+            </summary>
             <div class="{step1_class}">
                 <div class="onboarding-step__header">
                     <span class="onboarding-step__badge">{step1_badge}</span>
@@ -1590,7 +1619,7 @@ def render_onboarding_wizard(
                     KPIや資金繰り、シナリオ分析タブで意思決定に必要な示唆を確認しましょう。
                 </div>
             </div>
-        </div>
+        </details>
         """,
         unsafe_allow_html=True,
     )
