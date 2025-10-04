@@ -9533,7 +9533,14 @@ def main() -> None:
 
         col1, col2, col3, col4 = st.columns(4)
         sales_growth = col1.slider("売上成長率", min_value=-0.5, max_value=0.5, value=0.05, step=0.01)
-        cost_adj = col2.slider("原価率変動", min_value=-0.1, max_value=0.1, value=0.0, step=0.01)
+        cost_adj = col2.slider(
+            "原価率変動",
+            min_value=-0.1,
+            max_value=0.1,
+            value=0.0,
+            step=0.01,
+            help="粗利がマイナスにならないよう、シミュレーションでは原価率を最大99%に制限します。",
+        )
         sga_change = col3.slider("販管費変動率", min_value=-0.3, max_value=0.3, value=0.0, step=0.01)
         extra_ad = col4.number_input("追加広告費", min_value=0.0, value=0.0, step=50_000.0, format="%.0f")
 

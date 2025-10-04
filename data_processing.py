@@ -1717,7 +1717,7 @@ def simulate_pl(
 
     new_sales = current_sales * (1 + sales_growth_rate)
     base_cost_ratio = current_cogs / current_sales if current_sales else 0
-    new_cost_ratio = max(0, base_cost_ratio + cost_rate_adjustment)
+    new_cost_ratio = min(0.99, max(0, base_cost_ratio + cost_rate_adjustment))
     new_cogs = new_sales * new_cost_ratio
     new_gross = new_sales - new_cogs
     new_sga = current_sga * (1 + sga_change_rate) + additional_ad_cost
