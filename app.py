@@ -148,6 +148,8 @@ PLAN_CHANNEL_OPTIONS_BASE = [
 
 PLAN_EXPENSE_CLASSIFICATIONS = ["固定費", "変動費", "投資", "その他"]
 
+CATEGORY_SUGGESTION_LIMIT = 30
+
 SALES_PLAN_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
     "EC標準チャネル構成": [
         {"項目": "自社サイト売上", "月次売上": 1_200_000, "チャネル": "自社サイト"},
@@ -2664,6 +2666,11 @@ def render_plan_step_sales(state: Dict[str, Any], context: Dict[str, Any]) -> No
         state.get("sales_table"), SALES_PLAN_COLUMNS, ["月次売上"]
     )
 
+    manual_categories = state.get("sales_manual_categories")
+    if not isinstance(manual_categories, list):
+        manual_categories = []
+    state["sales_manual_categories"] = manual_categories
+
     render_instruction_popover(
         "売上入力のヒント",
         """
@@ -2744,14 +2751,34 @@ def render_plan_step_sales(state: Dict[str, Any], context: Dict[str, Any]) -> No
                 )
 
         common_candidates = list(
-            dict.fromkeys(COMMON_SALES_ITEMS + context.get("category_options", []))
+            dict.fromkeys(
+                COMMON_SALES_ITEMS
+                + context.get("category_options", [])
+                + state.get("sales_manual_categories", [])
+            )
         )
         selected_common = st.multiselect(
             "よく使う売上科目を追加",
             options=common_candidates,
             key="plan_sales_common_select",
-            help="複数選択すると、0円の行として追加され数値だけ入力すれば完了です。",
+            help="複数選択すると、0円の行として追加され数値だけ入力すれば完了です。候補にない科目は下の入力欄から手入力できます。",
         )
+        manual_input_cols = st.columns([3, 1])
+        manual_input = manual_input_cols[0].text_input(
+            "候補にない売上科目を追加",
+            key="plan_sales_manual_input",
+            help="一覧に表示されない科目名を入力し『追加』を押すと候補に加えられます。",
+        )
+        if manual_input_cols[1].button("追加", key="plan_add_sales_manual"):
+            manual_value = manual_input.strip()
+            if manual_value:
+                manual_categories.append(manual_value)
+                manual_categories[:] = list(dict.fromkeys(manual_categories))
+                state["sales_manual_categories"] = manual_categories
+                st.session_state["plan_sales_manual_input"] = ""
+                st.success(f"売上科目『{manual_value}』を候補に追加しました。")
+            else:
+                st.info("追加する売上科目名を入力してください。")
         if st.button("選択した科目を追加", key="plan_add_sales_common"):
             state["sales_table"], added = append_plan_rows(
                 state["sales_table"],
@@ -3153,11 +3180,13 @@ def render_business_plan_wizard(actual_sales: Optional[pd.DataFrame]) -> None:
                 if channel_str and channel_str not in channel_options:
                     channel_options.append(channel_str)
         if "category" in actual_sales.columns:
-            category_options = [
-                str(cat).strip()
-                for cat in actual_sales["category"].dropna().unique()
-                if str(cat).strip()
-            ]
+            raw_categories = (
+                actual_sales["category"].dropna().map(lambda cat: str(cat).strip())
+            )
+            filtered_categories = raw_categories[raw_categories != ""]
+            if not filtered_categories.empty:
+                category_counts = filtered_categories.value_counts()
+                category_options = list(category_counts.index[:CATEGORY_SUGGESTION_LIMIT])
 
     channel_options = list(dict.fromkeys(channel_options))
     context = {
