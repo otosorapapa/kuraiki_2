@@ -5,11 +5,13 @@ from __future__ import annotations
 import io
 import math
 from dataclasses import dataclass, field
+import hashlib
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import requests
+import streamlit as st
 
 # 共通で利用する列名の定義
 NORMALIZED_SALES_COLUMNS = [
@@ -71,6 +73,76 @@ DEFAULT_LOAN_REPAYMENT = 600_000  # 月次の借入返済額の仮値
 DEFAULT_DORMANCY_DAYS = 120  # 休眠判定に用いる前回購入からの日数
 
 
+CACHE_TTL_SECONDS = 24 * 60 * 60
+
+
+def _ensure_bytes(data: Optional[Any]) -> bytes:
+    """Convert various binary buffers to immutable bytes."""
+
+    if data is None:
+        return b""
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    if isinstance(data, memoryview):
+        return data.tobytes()
+    return bytes(data)
+
+
+def _build_file_cache_token(
+    name: Optional[str],
+    payload: bytes,
+    *,
+    scope: str,
+    hint: Optional[str] = None,
+) -> str:
+    """Create a deterministic cache token for uploaded files."""
+
+    digest = hashlib.md5(payload).hexdigest() if payload else "empty"
+    parts = [scope]
+    if name:
+        parts.append(name)
+    if hint:
+        parts.append(hint)
+    parts.append(digest)
+    return "::".join(parts)
+
+
+def _hash_bytes(data: bytes) -> str:
+    """Hash byte payloads for use with Streamlit caching."""
+
+    return hashlib.md5(data).hexdigest()
+
+
+def _coerce_file_payload(uploaded: Any) -> Optional[Tuple[Optional[str], bytes]]:
+    """Normalize UploadedFile or tuple inputs into (name, bytes)."""
+
+    if uploaded is None:
+        return None
+    if isinstance(uploaded, tuple) and len(uploaded) >= 2:
+        name, payload = uploaded[:2]
+        return name, _ensure_bytes(payload)
+
+    name = getattr(uploaded, "name", None)
+    buffer: Optional[Any] = None
+    if hasattr(uploaded, "getbuffer"):
+        try:
+            buffer = uploaded.getbuffer()
+        except Exception:  # pragma: no cover - fallback to read
+            buffer = None
+    if buffer is None and hasattr(uploaded, "read"):
+        try:
+            buffer = uploaded.read()
+        except Exception:  # pragma: no cover - fallback to bytes conversion
+            buffer = None
+    if buffer is None and isinstance(uploaded, (bytes, bytearray, memoryview)):
+        buffer = uploaded
+    if buffer is None:
+        return None
+    return name, _ensure_bytes(buffer)
+
+
 @dataclass
 class ValidationMessage:
     """Represents a validation result item for loaded datasets."""
@@ -87,6 +159,7 @@ class ValidationReport:
 
     messages: List[ValidationMessage] = field(default_factory=list)
     duplicate_rows: pd.DataFrame = field(default_factory=pd.DataFrame)
+    cache_token: Optional[str] = None
 
     def add_message(
         self,
@@ -126,6 +199,8 @@ class ValidationReport:
             return
         self.messages.extend(other.messages)
         self.add_duplicates(other.duplicate_rows)
+        if other.cache_token and not self.cache_token:
+            self.cache_token = other.cache_token
 
     def has_errors(self) -> bool:
         return any(msg.level == "error" for msg in self.messages)
@@ -359,43 +434,46 @@ def validate_sales_integrity(
     return report
 
 
+@st.cache_data(ttl=CACHE_TTL_SECONDS, hash_funcs={bytes: _hash_bytes})
 def load_sales_workbook(
-    uploaded_file,
+    file_payload: Optional[Tuple[Optional[str], bytes]],
     channel_hint: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, ValidationReport]:
     """アップロードされたExcel/CSVを読み込み正規化する。"""
 
-    if uploaded_file is None:
+    if not file_payload:
         return pd.DataFrame(columns=NORMALIZED_SALES_COLUMNS), ValidationReport()
 
-    try:
-        uploaded_file.seek(0)
-    except Exception:  # pragma: no cover - Streamlit's UploadedFile may not support seek
-        pass
+    _file_name, raw_bytes = file_payload
+    file_bytes = _ensure_bytes(raw_bytes)
+    if not file_bytes:
+        return pd.DataFrame(columns=NORMALIZED_SALES_COLUMNS), ValidationReport()
 
     read_errors: List[str] = []
 
     try:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(io.BytesIO(file_bytes))
     except ValueError as exc:
         read_errors.append(str(exc))
         try:
-            uploaded_file.seek(0)
-        except Exception:  # pragma: no cover - as above
-            pass
-        try:
-            df = pd.read_csv(uploaded_file)
-        except pd.errors.EmptyDataError as exc:
-            read_errors.append(str(exc))
+            df = pd.read_csv(io.BytesIO(file_bytes))
+        except pd.errors.EmptyDataError as csv_exc:
+            read_errors.append(str(csv_exc))
             df = pd.DataFrame()
-        except Exception as exc:  # pragma: no cover - unexpected parsers
-            read_errors.append(str(exc))
+        except Exception as csv_exc:  # pragma: no cover - unexpected parsers
+            read_errors.append(str(csv_exc))
             df = pd.DataFrame()
     except Exception as exc:  # pragma: no cover - general fallback
         read_errors.append(str(exc))
         df = pd.DataFrame()
 
-    detected = channel_hint or detect_channel_from_filename(getattr(uploaded_file, "name", None))
+    cache_token = _build_file_cache_token(
+        file_name,
+        file_bytes,
+        scope="sales",
+        hint=channel_hint,
+    )
+    detected = channel_hint or detect_channel_from_filename(file_name)
     normalized = normalize_sales_df(df, channel=detected)
 
     source_name_parts: List[str] = []
@@ -403,7 +481,6 @@ def load_sales_workbook(
         source_name_parts.append(channel_hint)
     elif detected:
         source_name_parts.append(detected)
-    file_name = getattr(uploaded_file, "name", None)
     if file_name:
         source_name_parts.append(file_name)
     source_name = " - ".join(source_name_parts) if source_name_parts else file_name
@@ -414,6 +491,7 @@ def load_sales_workbook(
             "error",
             f"{source_name or 'アップロードデータ'}の読み込みに失敗しました: {read_errors[-1]}",
         )
+    validation.cache_token = cache_token
     return normalized, validation
 
 
@@ -427,7 +505,13 @@ def load_sales_files(files_by_channel: Dict[str, List]) -> Tuple[pd.DataFrame, V
         if not files:
             continue
         for uploaded in files:
-            normalized, report = load_sales_workbook(uploaded, channel_hint=channel)
+            payload = _coerce_file_payload(uploaded)
+            if payload is None:
+                continue
+            normalized, report = load_sales_workbook(
+                payload,
+                channel_hint=channel,
+            )
             combined_report.extend(report)
             if not normalized.empty:
                 frames.append(normalized)
@@ -515,16 +599,21 @@ def fetch_sales_from_endpoint(
     return normalized, validation
 
 
-def load_cost_workbook(uploaded_file) -> pd.DataFrame:
+@st.cache_data(ttl=CACHE_TTL_SECONDS, hash_funcs={bytes: _hash_bytes})
+def load_cost_workbook(file_payload: Optional[Tuple[Optional[str], bytes]]) -> pd.DataFrame:
     """原価率表を読み込む。"""
-    if uploaded_file is None:
+    if not file_payload:
+        return pd.DataFrame(columns=["product_code", "product_name", "category", "price", "cost", "cost_rate"])
+
+    _file_name, raw_bytes = file_payload
+    file_bytes = _ensure_bytes(raw_bytes)
+    if not file_bytes:
         return pd.DataFrame(columns=["product_code", "product_name", "category", "price", "cost", "cost_rate"])
 
     try:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(io.BytesIO(file_bytes))
     except ValueError:
-        uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(io.BytesIO(file_bytes))
 
     rename_map = _build_rename_map(df.columns, COST_COLUMN_ALIASES)
     normalized = df.rename(columns=rename_map)
@@ -549,9 +638,27 @@ def load_cost_workbook(uploaded_file) -> pd.DataFrame:
     return normalized
 
 
-def load_subscription_workbook(uploaded_file) -> pd.DataFrame:
+@st.cache_data(ttl=CACHE_TTL_SECONDS, hash_funcs={bytes: _hash_bytes})
+def load_subscription_workbook(file_payload: Optional[Tuple[Optional[str], bytes]]) -> pd.DataFrame:
     """サブスク/KPIデータを読み込む。"""
-    if uploaded_file is None:
+    if not file_payload:
+        return pd.DataFrame(
+            columns=[
+                "month",
+                "active_customers",
+                "previous_active_customers",
+                "new_customers",
+                "repeat_customers",
+                "cancelled_subscriptions",
+                "marketing_cost",
+                "ltv",
+                "total_sales",
+            ]
+        )
+
+    _file_name, raw_bytes = file_payload
+    file_bytes = _ensure_bytes(raw_bytes)
+    if not file_bytes:
         return pd.DataFrame(
             columns=[
                 "month",
@@ -567,10 +674,9 @@ def load_subscription_workbook(uploaded_file) -> pd.DataFrame:
         )
 
     try:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(io.BytesIO(file_bytes))
     except ValueError:
-        uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(io.BytesIO(file_bytes))
 
     rename_map = _build_rename_map(df.columns, SUBSCRIPTION_COLUMN_ALIASES)
     normalized = df.rename(columns=rename_map).copy()
