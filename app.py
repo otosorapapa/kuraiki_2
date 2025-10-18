@@ -4525,10 +4525,15 @@ def enhanced_number_input(
 
     spinner_key = f"{key}_spinner"
     text_key = f"{key}_text"
+    pending_spinner_key = f"{spinner_key}_pending"
 
     current_value = caster(st.session_state.get(key, default_value))
     st.session_state.setdefault(key, current_value)
     st.session_state.setdefault(spinner_key, current_value)
+
+    if pending_spinner_key in st.session_state:
+        st.session_state[spinner_key] = caster(st.session_state[pending_spinner_key])
+        del st.session_state[pending_spinner_key]
 
     columns = container.columns([0.55, 0.45])
     previous_spinner_value = caster(st.session_state.get(spinner_key, current_value))
@@ -4590,7 +4595,7 @@ def enhanced_number_input(
     else:
         final_value = parsed_value
         st.session_state[key] = final_value
-        st.session_state[spinner_key] = final_value
+        st.session_state[pending_spinner_key] = final_value
         st.session_state[text_key] = _format_numeric_text(
             final_value, is_integer=is_integer, text_format=text_format
         )
