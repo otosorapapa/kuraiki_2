@@ -4545,7 +4545,6 @@ def enhanced_number_input(
 
     spinner_value = caster(spinner_value)
     st.session_state[key] = spinner_value
-    st.session_state[spinner_key] = spinner_value
 
     formatted_spinner = _format_numeric_text(
         spinner_value, is_integer=is_integer, text_format=text_format
