@@ -115,7 +115,6 @@ def trigger_rerun() -> None:
 
 
 HOTKEY_ACTION_STATE = "hotkey_action"
-HOTKEY_REFRESH_RESULTS = "refresh_results"
 HOTKEY_REFETCH_DATA = "refetch_data"
 
 
@@ -344,6 +343,28 @@ def widget_key_for(state_key: str) -> str:
 VALID_ICON_TONES = {"accent", "muted", "success", "warning", "error"}
 
 
+NUMERIC_TEXT_TRANSLATION = str.maketrans(
+    {
+        "０": "0",
+        "１": "1",
+        "２": "2",
+        "３": "3",
+        "４": "4",
+        "５": "5",
+        "６": "6",
+        "７": "7",
+        "８": "8",
+        "９": "9",
+        "．": ".",
+        "，": ",",
+        "－": "-",
+        "ー": "-",
+        "＋": "+",
+        "％": "%",
+    }
+)
+
+
 def build_ui_icon(code: str, *, tone: str = "accent", circle: bool = True) -> str:
     """指定したコードから単色スタイルのUIアイコンHTMLを生成する。"""
 
@@ -541,7 +562,7 @@ STATUS_PILL_DETAILS: Dict[str, Tuple[str, str, str]] = {
 
 
 PRIMARY_NAV_ITEMS: List[Dict[str, str]] = [
-    {"key": "dashboard", "label": "Dashboard", "icon": "DB"},
+    {"key": "dashboard", "label": "ダッシュボード", "icon": "DB"},
     {"key": "sales", "label": "売上", "icon": "SL"},
     {"key": "gross", "label": "粗利", "icon": "GR"},
     {"key": "inventory", "label": "在庫", "icon": "IV"},
@@ -565,16 +586,16 @@ TUTORIAL_INDEX: List[Dict[str, Any]] = [
 ]
 
 
-PRIMARY_COLOR = "#0F172A"
-SECONDARY_COLOR = "#475569"
+PRIMARY_COLOR = "#0B3C8C"
+SECONDARY_COLOR = "#1E293B"
 ACCENT_COLOR = "#2563EB"
-BACKGROUND_COLOR = "#F1F5F9"
+BACKGROUND_COLOR = "#F8FAFC"
 SURFACE_COLOR = "#FFFFFF"
-SUCCESS_COLOR = "#15803D"
-WARNING_COLOR = "#C2410C"
+SUCCESS_COLOR = "#0F766E"
+WARNING_COLOR = "#B45309"
 ERROR_COLOR = "#B91C1C"
-TEXT_COLOR = "#111827"
-CAPTION_TEXT_COLOR = "#64748B"
+TEXT_COLOR = "#0F172A"
+CAPTION_TEXT_COLOR = "#475569"
 MUTED_TEXT_COLOR = SECONDARY_COLOR
 LIGHT_THEME_TOKENS: Dict[str, str] = {
     "background": BACKGROUND_COLOR,
@@ -1153,6 +1174,40 @@ def inject_mckinsey_style(
             padding: 2rem;
             border: 1px solid var(--border-subtle-color);
             box-shadow: var(--shadow-md);
+            overflow: visible;
+        }}
+        .surface-card.main-nav-block {{
+            position: sticky;
+            top: 1.5rem;
+            z-index: 40;
+            padding: 1.5rem 2rem;
+            margin-bottom: var(--spacing-md);
+            backdrop-filter: blur(8px);
+        }}
+        .surface-card.quick-actions-block {{
+            margin-bottom: var(--spacing-md);
+        }}
+        .quick-action-info {{
+            background: rgba(11, 60, 140, 0.08);
+            border-radius: var(--radius-panel);
+            padding: 0.75rem 1rem;
+            font-size: calc(0.95rem * var(--font-scale));
+            color: var(--text-color);
+            box-shadow: var(--shadow-sm);
+        }}
+        .quick-action-info strong {{
+            color: var(--primary-color);
+            font-weight: 700;
+        }}
+        .stButton button, .stDownloadButton button {{
+            min-height: 3rem;
+            font-weight: 600;
+            border-radius: var(--radius-input);
+            padding: 0.75rem 1.5rem;
+        }}
+        .stButton button:focus-visible, .stDownloadButton button:focus-visible {{
+            outline: 3px solid var(--accent-color);
+            outline-offset: 2px;
         }}
         .hero-panel {{
             background: linear-gradient(135deg, rgba(11,31,59,0.9), rgba(30,136,229,0.75));
@@ -4395,6 +4450,155 @@ def persistent_segmented_control(
     return selected_value
 
 
+def _format_numeric_text(
+    value: Union[int, float, None],
+    *,
+    is_integer: bool,
+    text_format: Optional[str] = None,
+) -> str:
+    """数値入力用のテキスト表示を生成する。"""
+
+    if value is None:
+        return ""
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if np.isnan(numeric_value):
+        return ""
+    if text_format:
+        try:
+            return format(numeric_value, text_format)
+        except ValueError:
+            pass
+    if is_integer:
+        return f"{int(round(numeric_value)):,}"
+    if abs(numeric_value) >= 1000:
+        return f"{numeric_value:,.1f}"
+    if abs(numeric_value) >= 1:
+        return f"{numeric_value:,.2f}"
+    return f"{numeric_value:.4f}"
+
+
+def _normalize_numeric_text(value: str) -> str:
+    """全角文字や記号を考慮して数値文字列を標準化する。"""
+
+    normalized = (value or "").strip().translate(NUMERIC_TEXT_TRANSLATION)
+    normalized = normalized.replace("%", "")
+    normalized = normalized.replace(",", "")
+    return normalized
+
+
+def enhanced_number_input(
+    label: str,
+    *,
+    key: str,
+    default_value: Union[int, float],
+    min_value: Optional[Union[int, float]] = None,
+    max_value: Optional[Union[int, float]] = None,
+    step: Optional[Union[int, float]] = None,
+    number_format: Optional[str] = None,
+    help_text: Optional[str] = None,
+    text_format: Optional[str] = None,
+    placeholder: Optional[str] = None,
+    allow_float: bool = True,
+) -> Union[int, float]:
+    """ボタン操作と直接入力を併用できる数値入力コンポーネント。"""
+
+    is_integer = not allow_float
+    caster: Callable[[Union[int, float]], Union[int, float]] = int if is_integer else float
+
+    min_cast = caster(min_value) if min_value is not None else None
+    max_cast = caster(max_value) if max_value is not None else None
+    if step is None:
+        step_cast: Union[int, float] = 1 if is_integer else 1.0
+    else:
+        step_cast = caster(step)
+
+    if number_format is None:
+        number_format = "%d" if is_integer else "%.2f"
+
+    container = st.container()
+    container.markdown(f"**{label}**")
+    if help_text:
+        container.caption(help_text)
+
+    spinner_key = f"{key}_spinner"
+    text_key = f"{key}_text"
+
+    current_value = caster(st.session_state.get(key, default_value))
+    st.session_state.setdefault(key, current_value)
+    st.session_state.setdefault(spinner_key, current_value)
+
+    columns = container.columns([0.55, 0.45])
+    previous_spinner_value = caster(st.session_state.get(spinner_key, current_value))
+    spinner_value = columns[0].number_input(
+        "数値入力",
+        min_value=min_cast,
+        max_value=max_cast,
+        value=previous_spinner_value,
+        step=step_cast,
+        format=number_format,
+        key=spinner_key,
+        label_visibility="collapsed",
+    )
+
+    spinner_value = caster(spinner_value)
+    st.session_state[key] = spinner_value
+    st.session_state[spinner_key] = spinner_value
+
+    formatted_spinner = _format_numeric_text(
+        spinner_value, is_integer=is_integer, text_format=text_format
+    )
+    previous_formatted = _format_numeric_text(
+        previous_spinner_value, is_integer=is_integer, text_format=text_format
+    )
+    spinner_changed = spinner_value != previous_spinner_value
+    if text_key not in st.session_state:
+        st.session_state[text_key] = formatted_spinner
+    elif spinner_changed and st.session_state[text_key] == previous_formatted:
+        st.session_state[text_key] = formatted_spinner
+
+    text_value = columns[1].text_input(
+        "直接入力",
+        value=st.session_state[text_key],
+        key=text_key,
+        placeholder=placeholder or "例: 1,000",
+        label_visibility="visible",
+    )
+
+    parsed_value: Union[int, float] = spinner_value
+    error_message: Optional[str] = None
+    normalized = _normalize_numeric_text(text_value)
+    if normalized:
+        try:
+            parsed_float = float(normalized)
+        except ValueError:
+            error_message = "数値として認識できません。"
+        else:
+            if is_integer and not parsed_float.is_integer():
+                error_message = "整数で入力してください。"
+            else:
+                parsed_value = caster(parsed_float)
+                if min_cast is not None and parsed_value < min_cast:
+                    error_message = f"{min_cast:,}以上を入力してください。"
+                if max_cast is not None and parsed_value > max_cast:
+                    error_message = f"{max_cast:,}以下を入力してください。"
+
+    if error_message:
+        container.error(error_message)
+        final_value = spinner_value
+    else:
+        final_value = parsed_value
+        st.session_state[key] = final_value
+        st.session_state[spinner_key] = final_value
+        st.session_state[text_key] = _format_numeric_text(
+            final_value, is_integer=is_integer, text_format=text_format
+        )
+
+    return final_value
+
+
 def render_navigation() -> Tuple[str, str]:
     """トップレベルのナビゲーションを描画し、選択されたキーと表示ラベルを返す。"""
 
@@ -7553,33 +7757,74 @@ def render_scenario_analysis_section(
             st.subheader("シナリオパラメータ")
             default_name = f"シナリオ {len(scenarios) + 1}"
             scenario_name = st.text_input("シナリオ名", value=default_name)
-            growth = st.number_input("売上成長率 (%)", min_value=-50.0, max_value=150.0, value=5.0, step=0.5)
-            margin = st.number_input("営業利益率 (%)", min_value=0.0, max_value=100.0, value=12.0, step=0.5)
-            funding = st.number_input("資金調達額 (円)", min_value=0.0, value=0.0, step=100_000.0, format="%.0f")
+            growth = enhanced_number_input(
+                "売上成長率 (%)",
+                key="scenario_growth_input",
+                default_value=5.0,
+                min_value=-50.0,
+                max_value=150.0,
+                step=0.5,
+                number_format="%.1f",
+                text_format=",.1f",
+                placeholder="例: 5",
+            )
+            margin = enhanced_number_input(
+                "営業利益率 (%)",
+                key="scenario_margin_input",
+                default_value=12.0,
+                min_value=0.0,
+                max_value=100.0,
+                step=0.5,
+                number_format="%.1f",
+                text_format=",.1f",
+                placeholder="例: 12.5",
+            )
+            funding = enhanced_number_input(
+                "資金調達額 (円)",
+                key="scenario_funding_input",
+                default_value=0.0,
+                min_value=0.0,
+                step=100_000.0,
+                number_format="%.0f",
+                text_format=",.0f",
+                placeholder="例: 1,500,000",
+            )
             horizon = st.slider("分析期間 (ヶ月)", min_value=3, max_value=36, value=12)
-            unit_price_adjust_pct = st.number_input(
+            unit_price_adjust_pct = enhanced_number_input(
                 "単価調整幅 (%)",
+                key="scenario_unit_price_adjust",
+                default_value=float(form_defaults.get("unit_price_adjust_pct", 10.0)),
                 min_value=0.0,
                 max_value=100.0,
-                value=float(form_defaults.get("unit_price_adjust_pct", 10.0)),
                 step=0.5,
-                help="基準単価に対して感度分析で揺らす範囲を指定します。",
+                number_format="%.1f",
+                text_format=",.1f",
+                placeholder="例: 10",
+                help_text="基準単価に対して感度分析で揺らす範囲を指定します。",
             )
-            quantity_adjust_pct = st.number_input(
+            quantity_adjust_pct = enhanced_number_input(
                 "数量調整幅 (%)",
+                key="scenario_quantity_adjust",
+                default_value=float(form_defaults.get("quantity_adjust_pct", 10.0)),
                 min_value=0.0,
                 max_value=100.0,
-                value=float(form_defaults.get("quantity_adjust_pct", 10.0)),
                 step=0.5,
-                help="基準数量に対して感度分析で揺らす範囲を指定します。",
+                number_format="%.1f",
+                text_format=",.1f",
+                placeholder="例: 8",
+                help_text="基準数量に対して感度分析で揺らす範囲を指定します。",
             )
-            fixed_cost_adjust_pct = st.number_input(
+            fixed_cost_adjust_pct = enhanced_number_input(
                 "固定費調整幅 (%)",
+                key="scenario_fixed_cost_adjust",
+                default_value=float(form_defaults.get("fixed_cost_adjust_pct", 10.0)),
                 min_value=0.0,
                 max_value=100.0,
-                value=float(form_defaults.get("fixed_cost_adjust_pct", 10.0)),
                 step=0.5,
-                help="基準固定費に対する増減幅です。",
+                number_format="%.1f",
+                text_format=",.1f",
+                placeholder="例: 12",
+                help_text="基準固定費に対する増減幅です。",
             )
             submitted = st.form_submit_button("シナリオを追加")
             if submitted:
@@ -8379,62 +8624,150 @@ def main() -> None:
             st.session_state["api_last_fetched"].clear()
             st.success("保存されていたAPI取得データをクリアしました。")
 
-    fixed_cost = st.sidebar.number_input(
-        "月間固定費（販管費のうち人件費・地代等）",
-        value=float(DEFAULT_FIXED_COST),
-        step=50_000.0,
-        format="%.0f",
-        help="固定費に該当する販管費の合計額です。人件費・地代家賃・システム利用料などを含めて設定します。",
-    )
-    st.session_state["sidebar_fixed_cost"] = float(fixed_cost)
-    starting_cash = st.sidebar.number_input(
-        "現在の現金残高（円）",
-        value=3_000_000.0,
-        step=100_000.0,
-        format="%.0f",
-        help="ダッシュボード表示時点の現預金残高です。資金繰りの初期値として利用されます。",
-    )
+    finance_controls = st.sidebar.container()
+    with finance_controls:
+        fixed_cost = enhanced_number_input(
+            "月間固定費（販管費のうち人件費・地代等）",
+            key="sidebar_fixed_cost_input",
+            default_value=float(st.session_state.get("sidebar_fixed_cost", DEFAULT_FIXED_COST)),
+            min_value=0.0,
+            step=50_000.0,
+            number_format="%.0f",
+            text_format=",.0f",
+            placeholder="例: 450,000",
+            help_text="固定費に該当する販管費の合計額です。人件費・地代家賃・システム利用料などを含めて設定します。",
+        )
+        st.session_state["sidebar_fixed_cost"] = float(fixed_cost)
+        starting_cash = enhanced_number_input(
+            "現在の現金残高（円）",
+            key="sidebar_starting_cash_input",
+            default_value=float(st.session_state.get("sidebar_starting_cash", 3_000_000.0)),
+            min_value=0.0,
+            step=100_000.0,
+            number_format="%.0f",
+            text_format=",.0f",
+            placeholder="例: 3,000,000",
+            help_text="ダッシュボード表示時点の現預金残高です。資金繰りの初期値として利用されます。",
+        )
+        st.session_state["sidebar_starting_cash"] = float(starting_cash)
 
     with st.sidebar.expander("KPIの手入力（任意）"):
-        manual_active = st.number_input("当月アクティブ顧客数", min_value=0.0, value=0.0, step=50.0)
-        manual_new = st.number_input("当月新規顧客数", min_value=0.0, value=0.0, step=10.0)
-        manual_repeat = st.number_input("当月リピート顧客数", min_value=0.0, value=0.0, step=10.0)
-        manual_cancel = st.number_input("当月解約件数", min_value=0.0, value=0.0, step=5.0)
-        manual_prev_active = st.number_input("前月契約数", min_value=0.0, value=0.0, step=50.0)
-        manual_marketing = st.number_input("当月広告費", min_value=0.0, value=0.0, step=50_000.0)
-        manual_ltv = st.number_input("LTV試算値", min_value=0.0, value=0.0, step=1_000.0)
+        manual_active = enhanced_number_input(
+            "当月アクティブ顧客数",
+            key="manual_active_customers",
+            default_value=0,
+            min_value=0,
+            step=50,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 1,200",
+        )
+        manual_new = enhanced_number_input(
+            "当月新規顧客数",
+            key="manual_new_customers",
+            default_value=0,
+            min_value=0,
+            step=10,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 180",
+        )
+        manual_repeat = enhanced_number_input(
+            "当月リピート顧客数",
+            key="manual_repeat_customers",
+            default_value=0,
+            min_value=0,
+            step=10,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 320",
+        )
+        manual_cancel = enhanced_number_input(
+            "当月解約件数",
+            key="manual_cancel_customers",
+            default_value=0,
+            min_value=0,
+            step=5,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 25",
+        )
+        manual_prev_active = enhanced_number_input(
+            "前月契約数",
+            key="manual_previous_customers",
+            default_value=0,
+            min_value=0,
+            step=50,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 1,150",
+        )
+        manual_marketing = enhanced_number_input(
+            "当月広告費",
+            key="manual_marketing_cost",
+            default_value=0.0,
+            min_value=0.0,
+            step=50_000.0,
+            number_format="%.0f",
+            text_format=",.0f",
+            placeholder="例: 250,000",
+        )
+        manual_ltv = enhanced_number_input(
+            "LTV試算値",
+            key="manual_ltv_value",
+            default_value=0.0,
+            min_value=0.0,
+            step=1_000.0,
+            number_format="%.0f",
+            text_format=",.0f",
+            placeholder="例: 120,000",
+        )
 
         st.markdown("#### バランスト・スコアカード指標")
-        manual_inventory_days = st.number_input(
+        manual_inventory_days = enhanced_number_input(
             "在庫回転日数（目標: 45日以下）",
+            key="manual_inventory_days",
+            default_value=45.0,
             min_value=0.0,
-            value=45.0,
             step=1.0,
-            help="内部プロセス視点: 在庫を現金化するまでの日数を把握します。",
+            number_format="%.0f",
+            text_format=",.0f",
+            placeholder="例: 40",
+            help_text="内部プロセス視点: 在庫を現金化するまでの日数を把握します。",
         )
-        manual_stockout_pct = st.number_input(
+        manual_stockout_pct = enhanced_number_input(
             "欠品率（%）",
+            key="manual_stockout_pct",
+            default_value=4.0,
             min_value=0.0,
             max_value=100.0,
-            value=4.0,
             step=0.5,
-            help="内部プロセス視点: 欠品による販売機会損失を監視します。",
+            number_format="%.1f",
+            text_format=",.1f",
+            placeholder="例: 4",
+            help_text="内部プロセス視点: 欠品による販売機会損失を監視します。",
         )
-        manual_training_sessions = st.number_input(
+        manual_training_sessions = enhanced_number_input(
             "従業員研修実施数（月内）",
-            min_value=0.0,
-            value=2.0,
-            step=1.0,
-            format="%.0f",
-            help="学習・成長視点: 店長や経理がスキルを磨いた回数です。",
+            key="manual_training_sessions",
+            default_value=2,
+            min_value=0,
+            step=1,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 2",
+            help_text="学習・成長視点: 店長や経理がスキルを磨いた回数です。",
         )
-        manual_new_products = st.number_input(
+        manual_new_products = enhanced_number_input(
             "新商品リリース数（月内）",
-            min_value=0.0,
-            value=1.0,
-            step=1.0,
-            format="%.0f",
-            help="学習・成長視点: 新しい価値提案の数を追跡します。",
+            key="manual_new_products",
+            default_value=1,
+            min_value=0,
+            step=1,
+            allow_float=False,
+            text_format=",d",
+            placeholder="例: 1",
+            help_text="学習・成長視点: 新しい価値提案の数を追跡します。",
         )
 
     automated_sales_data = st.session_state.get("api_sales_data", {})
@@ -8501,7 +8834,7 @@ def main() -> None:
 
         def _navigate_to_upload() -> None:
             st.session_state["main_nav"] = "data"
-            st.session_state["primary_section_tab"] = "データ管理"
+            st.session_state["preferred_dashboard_tab"] = "データ管理"
             trigger_rerun()
 
         display_state_message(
@@ -8860,23 +9193,25 @@ def main() -> None:
 
     with st.container():
         st.markdown("<div class='surface-card quick-actions-block'>", unsafe_allow_html=True)
-        action_cols = st.columns(2)
+        action_cols = st.columns([1, 1])
         action_cols[0].button(
-            "結果を更新する",
-            key="quick_action_refresh_results",
-            use_container_width=True,
-            type="primary",
-            on_click=lambda: _queue_hotkey_action(HOTKEY_REFRESH_RESULTS),
-        )
-        action_cols[1].button(
             "最新データを再取得",
             key="quick_action_refetch_data",
             use_container_width=True,
             type="secondary",
             on_click=lambda: _queue_hotkey_action(HOTKEY_REFETCH_DATA),
         )
+        action_cols[1].markdown(
+            """
+            <div class='quick-action-info'>
+                <strong>自動更新</strong><br>
+                フィルタやタブの切り替えは即座に再計算されます。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        st.caption("ショートカット: Shift+Rで結果を更新 / Shift+Uで最新データを再取得")
+        st.caption("ショートカット: Shift+Uキーで最新データを再取得")
 
         hotkey_event = components.html(
             f"""
@@ -8907,7 +9242,6 @@ def main() -> None:
   const resolveAction = (event) => {{
     if (!event.shiftKey) {{ return null; }}
     const key = event.key ? event.key.toUpperCase() : "";
-    if (key === "R") {{ return "{HOTKEY_REFRESH_RESULTS}"; }}
     if (key === "U") {{ return "{HOTKEY_REFETCH_DATA}"; }}
     return null;
   }};
@@ -8968,9 +9302,7 @@ def main() -> None:
             return
         st.session_state["hotkey_last_processed"] = timestamp
 
-        if action == HOTKEY_REFRESH_RESULTS:
-            trigger_rerun()
-        elif action == HOTKEY_REFETCH_DATA:
+        if action == HOTKEY_REFETCH_DATA:
             feedback = refresh_configured_automations(channel_files)
             st.session_state["quick_action_feedback"] = feedback
             trigger_rerun()
@@ -9054,25 +9386,16 @@ def main() -> None:
 
             render_active_kpi_details(kpi_period_summary, kpi_metrics)
 
-            primary_tab_entries = [
-                ("売上", "SL"),
-                ("粗利", "GR"),
-                ("在庫", "IV"),
-                ("資金", "CS"),
-                ("KPI", "KP"),
-                ("データ管理", "DT"),
-            ]
-            icon_lookup = {label: icon for label, icon in primary_tab_entries}
-            tab_labels = [label for label, _ in primary_tab_entries]
-            selected_primary_tab = persistent_segmented_control(
-                "primary_section_tab",
-                tab_labels,
-                default=st.session_state.get("primary_section_tab", tab_labels[0]),
-                help_text="前回開いていたタブを記憶し、次回アクセス時も同じ画面から再開できます。",
-                format_func=lambda value: f"[{icon_lookup[value]}] {value}",
+            preferred_tab = st.session_state.pop("preferred_dashboard_tab", None)
+            if preferred_tab:
+                st.info(f"「{preferred_tab}」タブで詳細設定を確認できます。")
+
+            sales_tab, finance_tab, data_tab = st.tabs(
+                ["売上・粗利", "在庫・資金", "KPI・データ管理"]
             )
 
-            if selected_primary_tab == "売上":
+            with sales_tab:
+                st.markdown("#### 売上ダッシュボード")
                 render_sales_tab(
                     merged_df,
                     period_summary,
@@ -9080,20 +9403,27 @@ def main() -> None:
                     category_share_df,
                     selected_granularity_label,
                 )
-            elif selected_primary_tab == "粗利":
+                st.divider()
+                st.markdown("#### 粗利分析")
                 render_gross_tab(merged_df, period_summary, selected_granularity_label)
-            elif selected_primary_tab == "在庫":
+
+            with finance_tab:
+                st.markdown("#### 在庫・オペレーション")
                 render_inventory_tab(merged_df, kpi_period_summary, selected_kpi_row)
-            elif selected_primary_tab == "資金":
+                st.divider()
+                st.markdown("#### 資金繰りとキャッシュフロー")
                 render_cash_tab(
                     default_cash_plan,
                     default_cash_forecast,
                     starting_cash,
                     monthly_summary,
                 )
-            elif selected_primary_tab == "KPI":
+
+            with data_tab:
+                st.markdown("#### KPI詳細指標")
                 render_kpi_overview_tab(kpi_period_summary)
-            else:
+                st.divider()
+                st.markdown("#### データ連携状況")
                 render_data_status_section(
                     merged_df,
                     cost_df,
@@ -9542,7 +9872,17 @@ def main() -> None:
             help="粗利がマイナスにならないよう、シミュレーションでは原価率を最大99%に制限します。",
         )
         sga_change = col3.slider("販管費変動率", min_value=-0.3, max_value=0.3, value=0.0, step=0.01)
-        extra_ad = col4.number_input("追加広告費", min_value=0.0, value=0.0, step=50_000.0, format="%.0f")
+        with col4:
+            extra_ad = enhanced_number_input(
+                "追加広告費",
+                key="extra_ad_cost",
+                default_value=0.0,
+                min_value=0.0,
+                step=50_000.0,
+                number_format="%.0f",
+                text_format=",.0f",
+                placeholder="例: 300,000",
+            )
 
         pl_result = simulate_pl(
             base_pl,
@@ -9863,10 +10203,48 @@ def main() -> None:
 
             st.subheader("施策効果の簡易比較")
             with st.form("ab_test"):
-                before_rate = st.number_input("施策前リピート率(%)", min_value=0.0, max_value=100.0, value=60.0, step=1.0)
-                after_rate = st.number_input("施策後リピート率(%)", min_value=0.0, max_value=100.0, value=68.0, step=1.0)
-                before_count = st.number_input("施策前顧客数", min_value=1, value=100)
-                after_count = st.number_input("施策後顧客数", min_value=1, value=100)
+                before_rate = enhanced_number_input(
+                    "施策前リピート率(%)",
+                    key="abtest_before_rate",
+                    default_value=60.0,
+                    min_value=0.0,
+                    max_value=100.0,
+                    step=1.0,
+                    number_format="%.1f",
+                    text_format=",.1f",
+                    placeholder="例: 60",
+                )
+                after_rate = enhanced_number_input(
+                    "施策後リピート率(%)",
+                    key="abtest_after_rate",
+                    default_value=68.0,
+                    min_value=0.0,
+                    max_value=100.0,
+                    step=1.0,
+                    number_format="%.1f",
+                    text_format=",.1f",
+                    placeholder="例: 68",
+                )
+                before_count = enhanced_number_input(
+                    "施策前顧客数",
+                    key="abtest_before_count",
+                    default_value=100,
+                    min_value=1,
+                    step=1,
+                    allow_float=False,
+                    text_format=",d",
+                    placeholder="例: 100",
+                )
+                after_count = enhanced_number_input(
+                    "施策後顧客数",
+                    key="abtest_after_count",
+                    default_value=100,
+                    min_value=1,
+                    step=1,
+                    allow_float=False,
+                    text_format=",d",
+                    placeholder="例: 120",
+                )
                 submitted = st.form_submit_button("改善効果を計算")
                 if submitted:
                     improvement = after_rate - before_rate
