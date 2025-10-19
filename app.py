@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 # TODO: Streamlit UIコンポーネントを使ってダッシュボードを構築
+import base64
+import calendar
 import html
 import hashlib
 import importlib
 import io
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-import calendar
 from datetime import date, datetime, timedelta
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, quote
 
 import numpy as np
 import pandas as pd
@@ -23,6 +25,24 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_plotly_events import plotly_events
+
+
+REPORTLAB_AVAILABLE = True
+try:  # pragma: no cover - optional dependency check
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import landscape, A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+except ImportError:  # pragma: no cover - gracefully handle missing dependency
+    REPORTLAB_AVAILABLE = False
+
+
+PPTX_AVAILABLE = True
+try:  # pragma: no cover - optional dependency check
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+except ImportError:  # pragma: no cover - gracefully handle missing dependency
+    PPTX_AVAILABLE = False
 
 
 DATA_PROCESSING_IMPORT_ERROR: Optional[BaseException] = None
@@ -856,6 +876,94 @@ BSC_TARGETS = {
     "repeat_rate": 0.45,
     "inventory_turnover_days": 45,
     "training_sessions": 6,
+}
+
+
+KPI_HELP_CONTENT: Dict[str, Dict[str, Dict[str, str]]] = {
+    "active_customers": {
+        "ja": {
+            "title": "月次顧客数",
+            "formula": "対象期間中に購入・契約したユニーク顧客数。",
+            "interpretation": "前月比や目標との差からリテンション施策の成果を把握します。",
+        },
+        "en": {
+            "title": "Monthly Active Customers",
+            "formula": "Number of unique customers who purchased or subscribed in the period.",
+            "interpretation": "Track changes versus the previous month to understand retention performance.",
+        },
+    },
+    "ltv": {
+        "ja": {
+            "title": "LTV",
+            "formula": "平均購入単価 × リピート回数 × 粗利率。",
+            "interpretation": "顧客1人から得られる長期的な利益規模を示し、マーケ投資の上限設定に活用します。",
+        },
+        "en": {
+            "title": "LTV",
+            "formula": "Average order value × Repeat frequency × Gross margin rate.",
+            "interpretation": "Represents expected lifetime profit per customer and guides marketing spend limits.",
+        },
+    },
+    "arpu": {
+        "ja": {
+            "title": "ARPU",
+            "formula": "売上高 ÷ アクティブ顧客数。",
+            "interpretation": "顧客1人あたりの売上規模を示し、単価施策やアップセルの効果を確認します。",
+        },
+        "en": {
+            "title": "ARPU",
+            "formula": "Revenue ÷ Active customers.",
+            "interpretation": "Highlights monetisation per customer and the effectiveness of upsell initiatives.",
+        },
+    },
+    "churn_rate": {
+        "ja": {
+            "title": "解約率",
+            "formula": "当月の解約件数 ÷ 前月の契約者数。",
+            "interpretation": "値が高いほど解約が増加しているため、CSやプロダクト改善の緊急度が高まります。",
+        },
+        "en": {
+            "title": "Churn Rate",
+            "formula": "Cancelled subscriptions ÷ Prior month subscribers.",
+            "interpretation": "A higher value indicates accelerated churn and calls for urgent retention actions.",
+        },
+    },
+    "gross_margin_rate": {
+        "ja": {
+            "title": "粗利率",
+            "formula": "粗利 ÷ 売上高。",
+            "interpretation": "仕入・原価管理の効率を測る指標で、価格改定や値引きの影響を確認します。",
+        },
+        "en": {
+            "title": "Gross Margin Rate",
+            "formula": "Gross profit ÷ Revenue.",
+            "interpretation": "Measures purchasing efficiency and the impact of pricing or discounting decisions.",
+        },
+    },
+    "repeat_rate": {
+        "ja": {
+            "title": "リピート率",
+            "formula": "リピート顧客 ÷ アクティブ顧客数。",
+            "interpretation": "ファン化の度合いを示し、CRM施策の成果を把握します。",
+        },
+        "en": {
+            "title": "Repeat Rate",
+            "formula": "Repeat customers ÷ Active customers.",
+            "interpretation": "Shows how effectively customers are retained through CRM initiatives.",
+        },
+    },
+    "inventory_turnover_days": {
+        "ja": {
+            "title": "在庫回転日数",
+            "formula": "平均在庫金額 ÷ 売上原価 × 30日換算。",
+            "interpretation": "在庫の滞留状況や安全在庫の適正さを判断します。値が小さいほど現金化が早いです。",
+        },
+        "en": {
+            "title": "Inventory Turnover Days",
+            "formula": "Average inventory cost ÷ Cost of goods sold × 30 days.",
+            "interpretation": "Evaluates inventory velocity and safety stock; lower values indicate faster cash conversion.",
+        },
+    },
 }
 
 
@@ -2317,6 +2425,218 @@ def download_button_from_df(label: str, df: pd.DataFrame, filename: str) -> None
     clicked = st.download_button(label, buffer.getvalue(), file_name=filename, mime="text/csv")
     if clicked:
         display_state_message("csv_done", action_key=f"csv_done_{filename}")
+
+
+def download_excel_from_df(label: str, df: pd.DataFrame, filename: str) -> None:
+    """Excel形式でデータフレームをダウンロードするボタンを表示する。"""
+
+    if df is None or df.empty:
+        return
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        df.to_excel(writer, sheet_name="data", index=False)
+    st.download_button(
+        label,
+        buffer.getvalue(),
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _dataframe_to_pdf(df: pd.DataFrame, title: str, subtitle: Optional[str] = None) -> bytes:
+    """Convert DataFrame to PDF bytes using ReportLab."""
+
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab library is not available")
+
+    working_df = df.copy()
+    working_df = working_df.fillna("-")
+    str_df = working_df.astype(str)
+    data = [list(str_df.columns)] + str_df.values.tolist()
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    elements: List[Any] = []
+    elements.append(Paragraph(title, styles["Title"]))
+    if subtitle:
+        elements.append(Paragraph(subtitle, styles["Normal"]))
+    elements.append(Spacer(1, 12))
+    table = Table(data, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b1f33")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f5f7fa")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#c3c8d4")),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ]
+        )
+    )
+    elements.append(table)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def download_pdf_from_df(
+    label: str,
+    df: pd.DataFrame,
+    filename: str,
+    *,
+    title: str,
+    subtitle: Optional[str] = None,
+) -> None:
+    """PDF形式でダウンロードできるボタンを表示する。"""
+
+    if df is None or df.empty:
+        return
+
+    if not REPORTLAB_AVAILABLE:
+        st.button(label, disabled=True, help="reportlabのインストールが必要です。")
+        return
+
+    try:
+        pdf_bytes = _dataframe_to_pdf(df, title, subtitle)
+    except Exception as exc:  # pragma: no cover - PDF生成失敗時の保護
+        st.button(label, disabled=True, help=f"PDF生成でエラーが発生しました: {exc}")
+        return
+
+    st.download_button(
+        label,
+        pdf_bytes,
+        file_name=filename,
+        mime="application/pdf",
+    )
+
+
+def _dataframe_to_ppt(df: pd.DataFrame, title: str, subtitle: Optional[str] = None) -> bytes:
+    """Create a simple PowerPoint slide containing a table representation of the DataFrame."""
+
+    if not PPTX_AVAILABLE:
+        raise RuntimeError("python-pptx library is not available")
+
+    presentation = Presentation()
+    slide_layout = presentation.slide_layouts[5]
+    slide = presentation.slides.add_slide(slide_layout)
+    slide.shapes.title.text = title
+    if subtitle:
+        subtitle_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.0), Inches(9.0), Inches(0.6))
+        subtitle_frame = subtitle_box.text_frame
+        subtitle_frame.text = subtitle
+        subtitle_frame.paragraphs[0].font.size = Pt(14)
+
+    rows, cols = df.shape
+    table = slide.shapes.add_table(rows + 1, cols, Inches(0.5), Inches(1.8), Inches(9.0), Inches(5.0)).table
+
+    for col_idx, column in enumerate(df.columns):
+        cell = table.cell(0, col_idx)
+        cell.text = str(column)
+        for paragraph in cell.text_frame.paragraphs:
+            paragraph.font.bold = True
+            paragraph.font.size = Pt(12)
+
+    for row_idx, (_, row) in enumerate(df.iterrows(), start=1):
+        for col_idx, value in enumerate(row):
+            cell = table.cell(row_idx, col_idx)
+            cell.text = "-" if pd.isna(value) else str(value)
+            for paragraph in cell.text_frame.paragraphs:
+                paragraph.font.size = Pt(11)
+
+    buffer = io.BytesIO()
+    presentation.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def download_ppt_from_df(
+    label: str,
+    df: pd.DataFrame,
+    filename: str,
+    *,
+    title: str,
+    subtitle: Optional[str] = None,
+) -> None:
+    """PowerPoint形式でダウンロードできるボタンを表示する。"""
+
+    if df is None or df.empty:
+        return
+
+    if not PPTX_AVAILABLE:
+        st.button(label, disabled=True, help="python-pptxのインストールが必要です。")
+        return
+
+    try:
+        ppt_bytes = _dataframe_to_ppt(df, title, subtitle)
+    except Exception as exc:  # pragma: no cover - PPT生成失敗時の保護
+        st.button(label, disabled=True, help=f"PowerPoint生成でエラーが発生しました: {exc}")
+        return
+
+    st.download_button(
+        label,
+        ppt_bytes,
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+
+def encode_share_payload(payload: Dict[str, Any]) -> str:
+    """Convert a payload to a URL-safe base64 token."""
+
+    json_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    token = base64.urlsafe_b64encode(json_bytes).decode("utf-8")
+    return token.rstrip("=")
+
+
+def decode_share_payload(token: str) -> Optional[Dict[str, Any]]:
+    """Decode a URL-safe base64 token back into a dictionary."""
+
+    if not token:
+        return None
+    padding = "=" * (-len(token) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(token + padding)
+        return json.loads(decoded.decode("utf-8"))
+    except Exception:  # pragma: no cover - invalid share token recovery
+        return None
+
+
+def load_share_payload_from_query() -> None:
+    """URLパラメータの共有トークンを読み込みセッションに格納する。"""
+
+    params = st.experimental_get_query_params()
+    token_list = params.get("share")
+    if not token_list:
+        return
+    token = token_list[0]
+    if not token or st.session_state.get("scenario_share_token_loaded") == token:
+        return
+
+    payload = decode_share_payload(token)
+    if not payload:
+        st.warning("共有リンクの読み込みに失敗しました。URLをご確認ください。")
+        return
+
+    st.session_state["scenario_share_token"] = token
+    st.session_state["scenario_share_token_loaded"] = token
+    st.session_state["scenario_share_payload"] = payload
+
+    summary_records = payload.get("summary")
+    if summary_records:
+        try:
+            st.session_state["shared_scenario_summary_df"] = pd.DataFrame(summary_records)
+        except Exception:  # pragma: no cover - invalid payload failsafe
+            st.session_state["shared_scenario_summary_df"] = None
+    range_records = payload.get("range_summary")
+    if range_records:
+        try:
+            st.session_state["shared_scenario_range_df"] = pd.DataFrame(range_records)
+        except Exception:
+            st.session_state["shared_scenario_range_df"] = None
 
 
 def display_state_message(
@@ -5002,6 +5322,86 @@ def show_kpi_card(
     )
 
 
+KPI_LANGUAGE_OPTIONS = [
+    ("ja", "日本語"),
+    ("en", "English"),
+]
+
+
+def get_kpi_help(metric_key: str, language: str) -> Optional[Dict[str, str]]:
+    """指定したKPIの定義情報を取得する。"""
+
+    entry = KPI_HELP_CONTENT.get(metric_key)
+    if not entry:
+        return None
+    return entry.get(language) or entry.get("ja")
+
+
+def render_kpi_help_panel(language: str) -> None:
+    """選択した言語でKPIヘルプテーブルを表示する。"""
+
+    rows: List[Dict[str, str]] = []
+    for key, translations in KPI_HELP_CONTENT.items():
+        content = translations.get(language) or translations.get("ja")
+        if not content:
+            continue
+        rows.append(
+            {
+                "KPI": content.get("title", key),
+                "Formula": content.get("formula", "-"),
+                "Interpretation": content.get("interpretation", "-"),
+            }
+        )
+
+    if not rows:
+        st.info("定義情報が登録されていません。")
+        return
+
+    df = pd.DataFrame(rows)
+    if language == "ja":
+        df.rename(columns={"KPI": "指標", "Formula": "計算式", "Interpretation": "見方"}, inplace=True)
+    st.dataframe(df, hide_index=True, use_container_width=True)
+
+
+def render_kpi_help_controls() -> str:
+    """KPIヘルプ用の言語切替UIを描画し、選択言語コードを返す。"""
+
+    default_lang = st.session_state.get("kpi_help_language", "ja")
+    lang_index = next(
+        (idx for idx, (code, _) in enumerate(KPI_LANGUAGE_OPTIONS) if code == default_lang),
+        0,
+    )
+
+    controls = st.columns([3, 1])
+    with controls[0]:
+        selected_label = st.selectbox(
+            "KPIヘルプ言語",
+            options=[label for _, label in KPI_LANGUAGE_OPTIONS],
+            index=lang_index,
+            help="ツールチップおよびヘルプパネルで利用する言語を選択します。",
+        )
+    label_to_code = {label: code for code, label in KPI_LANGUAGE_OPTIONS}
+    language_code = label_to_code.get(selected_label, "ja")
+    st.session_state["kpi_help_language"] = language_code
+
+    with controls[1]:
+        if st.button("KPIヘルプ", type="secondary", help="指標の定義一覧を表示します。"):
+            st.session_state["kpi_help_visible"] = not st.session_state.get(
+                "kpi_help_visible", False
+            )
+
+    if st.session_state.get("kpi_help_visible"):
+        with st.expander("KPI定義ヘルプ", expanded=True):
+            render_kpi_help_panel(language_code)
+            st.button(
+                "ヘルプを閉じる",
+                key="close_kpi_help_panel",
+                on_click=lambda: st.session_state.update({"kpi_help_visible": False}),
+            )
+
+    return language_code
+
+
 def render_kgi_cards(
     selected_kpi_row: pd.Series,
     period_row: Optional[pd.DataFrame],
@@ -5271,6 +5671,7 @@ def _build_first_level_kpi_metrics(
                 "format_func": lambda v, unit=" 人": format_number(v, digits=0, unit=unit),
                 "chart_axis_format": ",.0f",
                 "is_percentage": False,
+                "definition_key": "active_customers",
             }
         )
 
@@ -5294,6 +5695,7 @@ def _build_first_level_kpi_metrics(
                 "format_func": _format_currency_compact,
                 "chart_axis_format": ",.0f",
                 "is_percentage": False,
+                "definition_key": "ltv",
             }
         )
 
@@ -5317,6 +5719,7 @@ def _build_first_level_kpi_metrics(
                 "format_func": _format_currency_compact,
                 "chart_axis_format": ",.0f",
                 "is_percentage": False,
+                "definition_key": "arpu",
             }
         )
 
@@ -5340,6 +5743,79 @@ def _build_first_level_kpi_metrics(
                 "format_func": format_percent,
                 "chart_axis_format": ".1%",
                 "is_percentage": True,
+                "definition_key": "churn_rate",
+            }
+        )
+
+    if "gross_margin_rate" in selected_kpi_row.index:
+        gross_margin_value = selected_kpi_row.get("gross_margin_rate")
+        gross_delta = selected_kpi_row.get("gross_margin_delta")
+        if pd.isna(gross_delta):
+            gross_delta = None
+        metrics.append(
+            {
+                "key": "gross_margin_rate",
+                "label": "粗利率",
+                "value": format_percent(gross_margin_value),
+                "raw_value": gross_margin_value,
+                "previous_raw_value": None,
+                "delta_value": gross_delta,
+                "delta_text": format_delta(gross_delta, percentage=True)
+                if gross_delta is not None
+                else None,
+                "value_column": "gross_margin_rate",
+                "format_func": format_percent,
+                "chart_axis_format": ".1%",
+                "is_percentage": True,
+                "definition_key": "gross_margin_rate",
+            }
+        )
+
+    if "repeat_rate" in selected_kpi_row.index:
+        repeat_value = selected_kpi_row.get("repeat_rate")
+        repeat_delta = selected_kpi_row.get("repeat_delta")
+        if pd.isna(repeat_delta):
+            repeat_delta = None
+        metrics.append(
+            {
+                "key": "repeat_rate",
+                "label": "リピート率",
+                "value": format_percent(repeat_value),
+                "raw_value": repeat_value,
+                "previous_raw_value": None,
+                "delta_value": repeat_delta,
+                "delta_text": format_delta(repeat_delta, percentage=True)
+                if repeat_delta is not None
+                else None,
+                "value_column": "repeat_rate",
+                "format_func": format_percent,
+                "chart_axis_format": ".1%",
+                "is_percentage": True,
+                "definition_key": "repeat_rate",
+            }
+        )
+
+    if "inventory_turnover_days" in selected_kpi_row.index:
+        inventory_value = selected_kpi_row.get("inventory_turnover_days")
+        inventory_delta = selected_kpi_row.get("inventory_turnover_delta")
+        if pd.isna(inventory_delta):
+            inventory_delta = None
+        metrics.append(
+            {
+                "key": "inventory_turnover_days",
+                "label": "在庫回転日数",
+                "value": format_number(inventory_value, digits=1, unit=" 日"),
+                "raw_value": inventory_value,
+                "previous_raw_value": None,
+                "delta_value": inventory_delta,
+                "delta_text": format_delta(inventory_delta, digits=1, unit=" 日")
+                if inventory_delta is not None
+                else None,
+                "value_column": "inventory_turnover_days",
+                "format_func": lambda v: format_number(v, digits=1, unit=" 日"),
+                "chart_axis_format": ",.0f",
+                "is_percentage": False,
+                "definition_key": "inventory_turnover_days",
             }
         )
 
@@ -5347,7 +5823,10 @@ def _build_first_level_kpi_metrics(
 
 
 def render_first_level_kpi_strip(
-    kpi_period_summary: pd.DataFrame, selected_kpi_row: pd.Series
+    kpi_period_summary: pd.DataFrame,
+    selected_kpi_row: pd.Series,
+    *,
+    help_language: str = "ja",
 ) -> List[Dict[str, Any]]:
     """第1階層KPIをStreamlitコンポーネントで表示する。"""
 
@@ -5372,6 +5851,17 @@ def render_first_level_kpi_strip(
                 metric["value"],
                 delta=metric.get("delta_text"),
             )
+            definition = get_kpi_help(metric.get("definition_key", ""), help_language)
+            if definition:
+                formula_text = definition.get("formula")
+                interpretation_text = definition.get("interpretation")
+                caption_parts = []
+                if formula_text:
+                    caption_parts.append(f"🔢 {formula_text}")
+                if interpretation_text:
+                    caption_parts.append(f"🎯 {interpretation_text}")
+                if caption_parts:
+                    st.caption(" | ".join(caption_parts))
             is_active = active_key == metric["key"]
             button_label = "詳細を閉じる" if is_active else "詳細を表示"
             button_type = "primary" if is_active else "secondary"
@@ -5392,6 +5882,8 @@ def render_first_level_kpi_strip(
 def render_active_kpi_details(
     kpi_period_summary: Optional[pd.DataFrame],
     metrics: Sequence[Dict[str, Any]],
+    *,
+    help_language: str = "ja",
 ) -> None:
     """選択中のKPIに応じた詳細ビューを表示する。"""
 
@@ -5433,6 +5925,12 @@ def render_active_kpi_details(
             metric["value"],
             delta=metric.get("delta_text"),
         )
+        definition = get_kpi_help(metric.get("definition_key", ""), help_language)
+        if definition:
+            explanation_parts = [definition.get("formula"), definition.get("interpretation")]
+            explanation = " | ".join(filter(None, explanation_parts))
+            if explanation:
+                st.caption(f"ℹ️ {explanation}")
 
         history = kpi_period_summary[["period_start", "period_label", value_column]].copy()
         history["period_start"] = pd.to_datetime(history["period_start"], errors="coerce")
@@ -5856,12 +6354,25 @@ def render_sales_tab(
                     use_container_width=True,
                     column_config=column_config,
                 )
-                toolbar = st.columns(2)
+                toolbar = st.columns(4)
+                export_filename_base = "sales_detail"
                 with toolbar[0]:
-                    download_button_from_df("CSV出力", display_df, "sales_detail.csv")
+                    download_button_from_df("CSV出力", detail_df, f"{export_filename_base}.csv")
                 with toolbar[1]:
-                    st.button(
-                        "PDF出力 (準備中)", disabled=True, key="gross_detail_pdf_placeholder"
+                    download_excel_from_df("Excel出力", detail_df, f"{export_filename_base}.xlsx")
+                with toolbar[2]:
+                    download_pdf_from_df(
+                        "PDF出力",
+                        detail_df,
+                        f"{export_filename_base}.pdf",
+                        title="商品別売上明細",
+                    )
+                with toolbar[3]:
+                    download_ppt_from_df(
+                        "PowerPoint",
+                        detail_df.head(20),
+                        f"{export_filename_base}.pptx",
+                        title="商品別売上トップ20",
                     )
 
 
@@ -6111,14 +6622,25 @@ def render_gross_tab(
                     lambda v: f"{v * 100:.1f}%" if pd.notna(v) else "-"
                 )
                 st.dataframe(display_df.head(50), hide_index=True, use_container_width=True)
-                toolbar = st.columns(2)
+                toolbar = st.columns(4)
+                export_base = "gross_profit_detail"
                 with toolbar[0]:
-                    download_button_from_df("CSV出力", detail_df, "gross_profit_detail.csv")
+                    download_button_from_df("CSV出力", detail_df, f"{export_base}.csv")
                 with toolbar[1]:
-                    st.button(
-                        "PDF出力 (準備中)",
-                        disabled=True,
-                        key="gross_transition_pdf_placeholder",
+                    download_excel_from_df("Excel出力", detail_df, f"{export_base}.xlsx")
+                with toolbar[2]:
+                    download_pdf_from_df(
+                        "PDF出力",
+                        detail_df,
+                        f"{export_base}.pdf",
+                        title="粗利・原価テーブル",
+                    )
+                with toolbar[3]:
+                    download_ppt_from_df(
+                        "PowerPoint",
+                        detail_df.head(20),
+                        f"{export_base}.pptx",
+                        title="粗利トップ20",
                     )
 
 
@@ -6551,14 +7073,25 @@ def render_inventory_tab(
                 for column in ["売上高", "推定原価", "推定在庫金額"]:
                     display_df[column] = display_df[column].map(lambda v: f"{v:,.0f}" if pd.notna(v) else "-")
                 st.dataframe(display_df.head(50), hide_index=True, use_container_width=True)
-                toolbar = st.columns(2)
+                toolbar = st.columns(4)
+                export_base = "inventory_overview"
                 with toolbar[0]:
-                    download_button_from_df("CSV出力", detail_df, "inventory_overview.csv")
+                    download_button_from_df("CSV出力", detail_df, f"{export_base}.csv")
                 with toolbar[1]:
-                    st.button(
-                        "PDF出力 (準備中)",
-                        disabled=True,
-                        key="gross_summary_pdf_placeholder",
+                    download_excel_from_df("Excel出力", detail_df, f"{export_base}.xlsx")
+                with toolbar[2]:
+                    download_pdf_from_df(
+                        "PDF出力",
+                        detail_df,
+                        f"{export_base}.pdf",
+                        title="在庫推計テーブル",
+                    )
+                with toolbar[3]:
+                    download_ppt_from_df(
+                        "PowerPoint",
+                        detail_df.head(20),
+                        f"{export_base}.pptx",
+                        title="在庫上位商品",
                     )
 
 
@@ -6948,14 +7481,25 @@ def render_cash_tab(
             for column in format_columns:
                 formatted_df[column] = formatted_df[column].map(lambda v: f"{v:,.0f}" if pd.notna(v) else "-")
             st.dataframe(formatted_df, hide_index=True, use_container_width=True)
-            toolbar = st.columns(2)
+            toolbar = st.columns(4)
+            export_base = "cash_flow_plan"
             with toolbar[0]:
-                download_button_from_df("CSV出力", display_df, "cash_flow_plan.csv")
+                download_button_from_df("CSV出力", display_df, f"{export_base}.csv")
             with toolbar[1]:
-                st.button(
-                    "PDF出力 (準備中)",
-                    disabled=True,
-                    key="gross_profit_pdf_placeholder",
+                download_excel_from_df("Excel出力", display_df, f"{export_base}.xlsx")
+            with toolbar[2]:
+                download_pdf_from_df(
+                    "PDF出力",
+                    display_df,
+                    f"{export_base}.pdf",
+                    title="キャッシュフロー明細",
+                )
+            with toolbar[3]:
+                download_ppt_from_df(
+                    "PowerPoint",
+                    display_df.head(20),
+                    f"{export_base}.pptx",
+                    title="キャッシュフロー概要",
                 )
 
 
@@ -7099,6 +7643,64 @@ def render_profit_meter(pl_result: pd.DataFrame, base_pl: Dict[str, float]) -> N
         st.caption(
             f"現状の原価率では損益分岐点を計算できませんが、シナリオ売上{scenario_sales:,.0f}円で{profit_text}です。"
         )
+
+
+def render_data_upload_guide(
+    merged_df: pd.DataFrame,
+    cost_df: pd.DataFrame,
+    subscription_df: pd.DataFrame,
+) -> None:
+    """アップロード手順とサンプルファイルを案内し、プレビューを表示する。"""
+
+    st.markdown("### データアップロードガイド")
+    st.caption("自社データを取り込むための手順とテンプレートをまとめています。")
+
+    with st.expander("Step-by-step ガイド", expanded=False):
+        st.markdown(
+            """
+            1. サイドバー上部の **「はじめに」** からサンプルデータを読み込むか、下のテンプレートをダウンロードします。
+            2. 自社の売上・原価率・サブスクKPIの列名をテンプレートに合わせて整形し、CSVまたはExcelで保存します。
+            3. サイドバーのアップロードセクションにファイルをドラッグ&ドロップすると、フォーマットチェックとプレビューが自動表示されます。
+            """
+        )
+        st.caption("必要項目が不足している場合は読み込み時に警告が表示されます。")
+
+    download_cols = st.columns(3)
+    with download_cols[0]:
+        st.markdown("**売上データテンプレート**")
+        sample_sales = generate_sample_sales_data().head(200)
+        download_button_from_df("CSV", sample_sales, "sample_sales.csv")
+        download_excel_from_df("Excel", sample_sales, "sample_sales.xlsx")
+    with download_cols[1]:
+        st.markdown("**原価率テンプレート**")
+        sample_cost = generate_sample_cost_data()
+        download_button_from_df("CSV", sample_cost, "sample_cost.csv")
+        download_excel_from_df("Excel", sample_cost, "sample_cost.xlsx")
+    with download_cols[2]:
+        st.markdown("**KPIテンプレート**")
+        sample_kpi = generate_sample_subscription_data()
+        download_button_from_df("CSV", sample_kpi, "sample_kpi.csv")
+        download_excel_from_df("Excel", sample_kpi, "sample_kpi.xlsx")
+
+    st.markdown("#### アップロード済みデータのプレビュー")
+    preview_tabs = st.tabs(["売上", "原価率", "KPI"])
+    with preview_tabs[0]:
+        if merged_df is None or merged_df.empty:
+            st.info("売上データがアップロードされていません。")
+        else:
+            st.dataframe(merged_df.head(20), hide_index=True, use_container_width=True)
+    with preview_tabs[1]:
+        if cost_df is None or cost_df.empty:
+            st.info("原価率データがアップロードされていません。")
+        else:
+            st.dataframe(cost_df.head(20), hide_index=True, use_container_width=True)
+    with preview_tabs[2]:
+        if subscription_df is None or subscription_df.empty:
+            st.info("サブスクKPIデータがアップロードされていません。")
+        else:
+            st.dataframe(subscription_df.head(20), hide_index=True, use_container_width=True)
+
+    st.markdown("---")
 
 
 def render_data_status_section(
@@ -7544,6 +8146,138 @@ def _build_profit_range_cases(
         range_df["fixed_cost_pct"] = range_df["fixed_cost_pct"] * 100.0
 
     return range_df
+
+
+def build_tornado_dataframe(profit_range_df: pd.DataFrame) -> pd.DataFrame:
+    """単変量ごとの利益インパクトを算出しトルネード図用に整形する。"""
+
+    if profit_range_df is None or profit_range_df.empty:
+        return pd.DataFrame()
+
+    factors = [
+        ("unit_price_pct", "単価"),
+        ("quantity_pct", "数量"),
+        ("fixed_cost_pct", "固定費"),
+    ]
+
+    rows: List[Dict[str, Any]] = []
+    tolerance = 1e-6
+    for scenario, scenario_df in profit_range_df.groupby("scenario"):
+        base_row = scenario_df[
+            (scenario_df["unit_price_pct"].abs() < tolerance)
+            & (scenario_df["quantity_pct"].abs() < tolerance)
+            & (scenario_df["fixed_cost_pct"].abs() < tolerance)
+        ]
+        if base_row.empty:
+            continue
+        base_profit = float(base_row["profit"].iloc[0])
+
+        for column, label in factors:
+            others = [col for col, _ in factors if col != column]
+
+            positive_df = scenario_df[
+                (scenario_df[column] > tolerance)
+                & np.logical_and.reduce([scenario_df[other].abs() < tolerance for other in others])
+            ]
+            negative_df = scenario_df[
+                (scenario_df[column] < -tolerance)
+                & np.logical_and.reduce([scenario_df[other].abs() < tolerance for other in others])
+            ]
+
+            if not positive_df.empty:
+                impact = float(positive_df["profit"].max()) - base_profit
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "factor": label,
+                        "direction": "増加",
+                        "impact": impact,
+                    }
+                )
+            if not negative_df.empty:
+                impact = float(negative_df["profit"].min()) - base_profit
+                rows.append(
+                    {
+                        "scenario": scenario,
+                        "factor": label,
+                        "direction": "減少",
+                        "impact": impact,
+                    }
+                )
+
+    tornado_df = pd.DataFrame(rows)
+    if tornado_df.empty:
+        return tornado_df
+
+    tornado_df["impact_abs"] = tornado_df["impact"].abs()
+    return tornado_df
+
+
+def render_scenario_share_controls(
+    summary_df: Optional[pd.DataFrame],
+    profit_range_summary: Optional[pd.DataFrame] = None,
+) -> None:
+    """シナリオ比較結果の共有リンク生成UIを表示する。"""
+
+    if summary_df is None or summary_df.empty:
+        return
+
+    share_cols = st.columns([3, 1])
+    with share_cols[0]:
+        st.caption("共有リンクを作成すると同じ結果をチームに展開できます。")
+    with share_cols[1]:
+        if st.button("共有リンクを生成", key="generate_scenario_share"):
+            payload = {
+                "generated_at": datetime.utcnow().isoformat(),
+                "summary": summary_df.to_dict(orient="records"),
+            }
+            if profit_range_summary is not None and not profit_range_summary.empty:
+                payload["range_summary"] = profit_range_summary.to_dict(orient="records")
+            token = encode_share_payload(payload)
+            st.session_state["scenario_share_token"] = token
+            st.experimental_set_query_params(share=token)
+            st.success("共有用のクエリパラメータを生成しました。ブラウザのURLをコピーしてください。")
+
+    token = st.session_state.get("scenario_share_token")
+    if token:
+        share_suffix = f"?share={token}"
+        st.text_input("共有クエリ", share_suffix, key="scenario_share_suffix")
+        mail_body = quote(
+            "このダッシュボードにアクセスし、URL末尾に" + share_suffix + "を付与して確認してください。"
+        )
+        st.markdown(f"[メールで共有する](mailto:?subject=Scenario%20Share&body={mail_body})")
+
+
+def render_shared_scenario_preview() -> None:
+    """共有リンクから読み込んだシナリオ比較結果を表示する。"""
+
+    summary_df = st.session_state.get("shared_scenario_summary_df")
+    if summary_df is None or summary_df.empty:
+        return
+
+    st.markdown("### 共有されたシナリオ比較")
+    st.info("共有リンクから読み込んだ結果を表示しています。サンプルデータがなくても比較概要を確認できます。")
+    format_map = {
+        column: fmt
+        for column, fmt in {
+            "年間売上": "{:.0f}",
+            "年間利益": "{:.0f}",
+            "平均月次売上": "{:.0f}",
+            "期末キャッシュ": "{:.0f}",
+            "成長率(%)": "{:.1f}",
+            "利益率(%)": "{:.1f}",
+        }.items()
+        if column in summary_df.columns
+    }
+    st.dataframe(summary_df.style.format(format_map), use_container_width=True)
+    range_df = st.session_state.get("shared_scenario_range_df")
+    if isinstance(range_df, pd.DataFrame) and not range_df.empty:
+        range_format = {
+            column: "{:.0f}"
+            for column in ["最小利益", "最大利益", "利益幅"]
+            if column in range_df.columns
+        }
+        st.dataframe(range_df.style.format(range_format), use_container_width=True)
 
 
 def run_scenario_projection(
@@ -8050,11 +8784,13 @@ def render_scenario_analysis_section(
             st.session_state["phase2_summary_df"] = None
             st.session_state["scenario_profit_ranges"] = None
             st.session_state["scenario_profit_range_summary"] = None
+            render_shared_scenario_preview()
         elif not scenarios:
             st.info("比較するシナリオを追加してください。")
             st.session_state["phase2_summary_df"] = None
             st.session_state["scenario_profit_ranges"] = None
             st.session_state["scenario_profit_range_summary"] = None
+            render_shared_scenario_preview()
         else:
             total = len(scenarios)
             progress = st.progress(0.0)
@@ -8090,6 +8826,7 @@ def render_scenario_analysis_section(
                 st.session_state["scenario_results"] = combined_df
                 summary_df = pd.DataFrame(summaries)
                 st.session_state["phase2_summary_df"] = summary_df
+                range_summary: Optional[pd.DataFrame] = None
                 if profit_range_frames:
                     combined_profit_range = pd.concat(profit_range_frames, ignore_index=True)
                     st.session_state["scenario_profit_ranges"] = combined_profit_range
@@ -8104,6 +8841,7 @@ def render_scenario_analysis_section(
                 else:
                     st.session_state["scenario_profit_ranges"] = None
                     st.session_state["scenario_profit_range_summary"] = None
+                    range_summary = None
 
                 st.markdown("### 年間売上・利益比較")
                 st.dataframe(
@@ -8159,6 +8897,39 @@ def render_scenario_analysis_section(
                     ).properties(height=320)
                     st.markdown("### 単価・数量・固定費の利益レンジ")
                     st.altair_chart(apply_altair_theme(range_chart), use_container_width=True)
+                    tornado_df = build_tornado_dataframe(combined_profit_range)
+                    if not tornado_df.empty:
+                        st.markdown("### トルネードチャート: 利益感度")
+                        tornado_chart = (
+                            alt.Chart(tornado_df)
+                            .mark_bar()
+                            .encode(
+                                y=alt.Y(
+                                    "factor:N",
+                                    sort=alt.SortField("impact_abs", order="descending"),
+                                    title="要因",
+                                ),
+                                x=alt.X(
+                                    "impact:Q",
+                                    title="年間利益インパクト",
+                                    axis=alt.Axis(format=",.0f"),
+                                ),
+                                color=alt.Color(
+                                    "direction:N",
+                                    title="方向",
+                                    scale=alt.Scale(range=[ERROR_COLOR, SUCCESS_COLOR]),
+                                ),
+                                tooltip=[
+                                    alt.Tooltip("scenario:N", title="シナリオ"),
+                                    alt.Tooltip("factor:N", title="要因"),
+                                    alt.Tooltip("direction:N", title="変化方向"),
+                                    alt.Tooltip("impact:Q", title="利益影響", format=",.0f"),
+                                ],
+                            )
+                            .properties(height=320)
+                            .facet(column=alt.Column("scenario:N", title="シナリオ"))
+                        )
+                        st.altair_chart(apply_altair_theme(tornado_chart), use_container_width=True)
                     display_profit_range = combined_profit_range.rename(
                         columns={
                             "unit_price_pct": "単価変化(%)",
@@ -8190,6 +8961,7 @@ def render_scenario_analysis_section(
                                 }
                             )
                         )
+                render_scenario_share_controls(summary_df, range_summary)
             else:
                 st.info("シナリオ計算結果を取得できませんでした。")
                 st.session_state["phase2_summary_df"] = None
@@ -8470,6 +9242,7 @@ def render_sales_upload_wizard(
 def main() -> None:
     init_phase2_session_state()
     ensure_theme_state_defaults()
+    load_share_payload_from_query()
 
     st.markdown("<div id='page-top'></div>", unsafe_allow_html=True)
 
@@ -9462,7 +10235,12 @@ def main() -> None:
             render_status_banner(alerts)
             st.caption(f"対象期間: {period_start} 〜 {period_end}")
 
-            kpi_metrics = render_first_level_kpi_strip(kpi_period_summary, selected_kpi_row)
+            help_language = render_kpi_help_controls()
+            kpi_metrics = render_first_level_kpi_strip(
+                kpi_period_summary,
+                selected_kpi_row,
+                help_language=help_language,
+            )
             bsc_quadrants = build_bsc_quadrants(selected_kpi_row)
             if bsc_quadrants:
                 st.markdown("### バランスト・スコアカード")
@@ -9480,7 +10258,11 @@ def main() -> None:
                     render_bsc_quadrant_chart(bsc_quadrants)
                 st.caption("ターゲットを達成した象限はハイライト表示されます。")
 
-            render_active_kpi_details(kpi_period_summary, kpi_metrics)
+            render_active_kpi_details(
+                kpi_period_summary,
+                kpi_metrics,
+                help_language=help_language,
+            )
 
             preferred_tab = st.session_state.pop("preferred_dashboard_tab", None)
             if preferred_tab:
@@ -10398,6 +11180,7 @@ def main() -> None:
             """
         )
 
+        render_data_upload_guide(merged_full, cost_df, subscription_df)
         render_business_plan_wizard(merged_full)
         st.markdown("---")
 
@@ -10466,11 +11249,6 @@ def main() -> None:
 
         with st.expander("売上データのプレビュー"):
             st.dataframe(merged_full.head(100))
-
-        st.markdown("テンプレート/サンプルデータのダウンロード")
-        download_button_from_df("サンプル売上データ", generate_sample_sales_data().head(200), "sample_sales.csv")
-        download_button_from_df("サンプル原価率データ", generate_sample_cost_data(), "sample_cost.csv")
-        download_button_from_df("サンプルKPIデータ", generate_sample_subscription_data(), "sample_kpi.csv")
 
         st.markdown("---")
         st.markdown("アプリの使い方や改善要望があれば開発チームまでご連絡ください。")
