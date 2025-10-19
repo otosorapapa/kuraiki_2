@@ -7618,6 +7618,15 @@ def render_inventory_tab(
 ) -> None:
     """在庫タブの主要指標と推計表を表示する。"""
 
+    turnover_days_value: float = 0.0
+    if selected_kpi_row is not None:
+        candidate = selected_kpi_row.get("inventory_turnover_days")
+        if candidate is not None and not pd.isna(candidate) and float(candidate) > 0:
+            turnover_days_value = float(candidate)
+
+    if turnover_days_value <= 0:
+        turnover_days_value = 45.0
+
     if kpi_period_summary is not None and not kpi_period_summary.empty:
         st.markdown("<div class='chart-section'>", unsafe_allow_html=True)
         st.markdown(
@@ -7625,8 +7634,52 @@ def render_inventory_tab(
             unsafe_allow_html=True,
         )
         history = kpi_period_summary.tail(12).copy()
-        history["period_start"] = pd.to_datetime(history["period_start"])
+        history["period_start"] = pd.to_datetime(history["period_start"], errors="coerce")
+        history["period_end"] = pd.to_datetime(history.get("period_end"), errors="coerce")
+        history["period_days"] = (
+            (history["period_end"] - history["period_start"]).dt.days.fillna(0).astype(int) + 1
+        )
+        if {"sales", "gross_profit"}.issubset(history.columns):
+            history["cogs"] = history["sales"] - history["gross_profit"]
+        else:
+            history["cogs"] = np.nan
+        history["inventory_balance"] = np.where(
+            (history["cogs"].notna())
+            & (history["cogs"] > 0)
+            & (history["inventory_turnover_days"].notna())
+            & (history["inventory_turnover_days"] > 0)
+            & (history["period_days"] > 0),
+            history["cogs"] / history["period_days"] * history["inventory_turnover_days"],
+            np.nan,
+        )
         chart_cols = st.columns(2)
+        balance_source = history.dropna(subset=["inventory_balance"]).copy()
+        if not balance_source.empty:
+            balance_chart = (
+                alt.Chart(balance_source)
+                .mark_area(line={"color": INVENTORY_SERIES_COLOR}, color="rgba(37,99,235,0.18)")
+                .encode(
+                    x=alt.X(
+                        "period_start:T",
+                        title="期間開始",
+                        axis=alt.Axis(format="%Y-%m", labelOverlap=True),
+                    ),
+                    y=alt.Y("inventory_balance:Q", title="推定在庫残高", axis=alt.Axis(format=",.0f")),
+                    tooltip=[
+                        alt.Tooltip("period_label:N", title="期間"),
+                        alt.Tooltip("inventory_balance:Q", title="推定在庫残高", format=",.0f"),
+                        alt.Tooltip("inventory_turnover_days:Q", title="在庫回転日数", format=",.1f"),
+                    ],
+                )
+                .properties(height=260)
+            )
+            st.altair_chart(apply_altair_theme(balance_chart), use_container_width=True)
+            st.caption(
+                "在庫残高は当期の売上原価と在庫回転日数から推計しています。濃い部分は在庫金額の増加局面です。"
+            )
+        else:
+            st.info("在庫残高の推移を算出するための指標が揃っていません。データのアップロード状況をご確認ください。")
+
         turnover_line = alt.Chart(history).mark_line(
             color=INVENTORY_SERIES_COLOR, point=alt.OverlayMarkDef(size=60, filled=True)
         ).encode(
@@ -7790,6 +7843,65 @@ def render_inventory_tab(
             unsafe_allow_html=True,
         )
         render_inventory_heatmap(merged_df, selected_kpi_row)
+
+        st.markdown(
+            "<div class='chart-section__header'><div class='chart-section__title'>売れ残りリスク商品</div></div>",
+            unsafe_allow_html=True,
+        )
+        slow_mover_df = (
+            merged_df.groupby(["product_code", "product_name", "category"], as_index=False)[
+                ["sales_amount", "quantity", "estimated_cost"]
+            ]
+            .sum()
+        )
+        if slow_mover_df.empty:
+            st.info("売れ残りリスクを評価するための商品別データが不足しています。")
+        else:
+            slow_mover_df.rename(columns={"quantity": "販売数量", "estimated_cost": "推定原価"}, inplace=True)
+            slow_mover_df["推定在庫金額"] = np.where(
+                slow_mover_df["推定原価"] > 0,
+                slow_mover_df["推定原価"] / 30.0 * turnover_days_value,
+                np.nan,
+            )
+            slow_mover_df["回転率(推計)"] = np.where(
+                slow_mover_df["推定在庫金額"] > 0,
+                slow_mover_df["sales_amount"] / slow_mover_df["推定在庫金額"],
+                np.nan,
+            )
+            candidates = slow_mover_df.sort_values(
+                ["回転率(推計)", "販売数量", "推定在庫金額"], ascending=[True, True, False]
+            ).head(5)
+            display_cols = candidates[
+                [
+                    "product_code",
+                    "product_name",
+                    "category",
+                    "販売数量",
+                    "sales_amount",
+                    "推定在庫金額",
+                    "回転率(推計)",
+                ]
+            ].copy()
+            display_cols.rename(
+                columns={
+                    "product_code": "商品コード",
+                    "product_name": "商品名",
+                    "category": "カテゴリ",
+                    "sales_amount": "売上高",
+                },
+                inplace=True,
+            )
+            for column in ["販売数量", "売上高", "推定在庫金額"]:
+                display_cols[column] = display_cols[column].map(
+                    lambda v: f"{v:,.0f}" if pd.notna(v) else "-"
+                )
+            display_cols["回転率(推計)"] = display_cols["回転率(推計)"].map(
+                lambda v: f"{v:,.2f}" if pd.notna(v) else "-"
+            )
+            st.dataframe(display_cols, use_container_width=True, hide_index=True)
+            st.caption(
+                "回転率が1未満の商品は売れ残りリスクが高いため、販促や在庫調整の検討をおすすめします。"
+            )
         st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("在庫推計テーブル", expanded=False):
@@ -7808,9 +7920,8 @@ def render_inventory_tab(
             if detail_df.empty:
                 st.info("表示できる明細がありません。")
             else:
-                turnover_days = selected_kpi_row.get("inventory_turnover_days")
-                if turnover_days is not None and not pd.isna(turnover_days) and turnover_days > 0:
-                    detail_df["推定在庫金額"] = detail_df["推定原価"] / 30.0 * float(turnover_days)
+                if turnover_days_value > 0:
+                    detail_df["推定在庫金額"] = detail_df["推定原価"] / 30.0 * float(turnover_days_value)
                 else:
                     detail_df["推定在庫金額"] = np.nan
                 detail_df.sort_values("推定在庫金額", ascending=False, inplace=True)
@@ -10998,6 +11109,11 @@ def main() -> None:
     kpis = calculate_kpis(merged_df, subscription_df, overrides=kpi_overrides)
     kpi_history_df = build_kpi_history_df(merged_df, subscription_df, kpi_overrides)
     kpi_period_summary = aggregate_kpi_history(kpi_history_df, selected_freq)
+    latest_kpi_row: Optional[pd.Series]
+    if kpi_period_summary.empty:
+        latest_kpi_row = None
+    else:
+        latest_kpi_row = kpi_period_summary.iloc[-1]
 
     base_pl = create_current_pl(merged_df, subscription_df, fixed_cost=fixed_cost)
     default_cash_plan = create_default_cashflow_plan(merged_df)
@@ -11461,6 +11577,29 @@ def main() -> None:
 
             st.markdown("### ABC分析（売上上位30商品）")
             render_abc_analysis(analysis_df)
+
+    elif selected_nav_key == "inventory":
+        st.subheader("在庫分析")
+        if merged_df.empty and kpi_period_summary.empty:
+            st.info("在庫分析に必要なデータが読み込まれていません。サンプルデータを利用するかCSVをアップロードしてください。")
+        else:
+            selected_inventory_row: Optional[pd.Series] = latest_kpi_row
+            if not kpi_period_summary.empty:
+                period_options = kpi_period_summary["period_label"].tolist()
+                default_idx = len(period_options) - 1 if period_options else 0
+                selected_period_label = st.selectbox(
+                    "表示する期間",
+                    options=period_options,
+                    index=default_idx,
+                    key="inventory_period_select",
+                )
+                try:
+                    selected_inventory_row = kpi_period_summary[
+                        kpi_period_summary["period_label"] == selected_period_label
+                    ].iloc[0]
+                except IndexError:
+                    selected_inventory_row = latest_kpi_row
+            render_inventory_tab(merged_df, kpi_period_summary, selected_inventory_row)
 
     elif selected_nav_key == "gross":
         st.subheader("利益分析")
