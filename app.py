@@ -10,9 +10,11 @@ import importlib
 import io
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from pathlib import Path
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 from urllib.parse import parse_qsl, quote
@@ -71,6 +73,7 @@ try:
         ValidationReport,
         load_cost_workbook,
         load_sales_files,
+        load_sales_workbook,
         load_subscription_workbook,
         merge_sales_and_costs,
         monthly_sales_summary,
@@ -419,6 +422,23 @@ FILTER_STATE_KEYS = {
     "period": "filter_period",
     "freq": "filter_frequency",
     "signature": "filter_signature",
+}
+
+UPLOAD_STORAGE_ROOT = Path("uploaded_data")
+MAX_UPLOAD_HISTORY = 50
+
+MANUAL_INPUT_FORMATS: Dict[str, Dict[str, Any]] = {
+    "manual_active_customers": {"is_integer": True, "text_format": ",d"},
+    "manual_new_customers": {"is_integer": True, "text_format": ",d"},
+    "manual_repeat_customers": {"is_integer": True, "text_format": ",d"},
+    "manual_cancel_customers": {"is_integer": True, "text_format": ",d"},
+    "manual_previous_customers": {"is_integer": True, "text_format": ",d"},
+    "manual_marketing_cost": {"is_integer": False, "text_format": ",.0f"},
+    "manual_ltv_value": {"is_integer": False, "text_format": ",.0f"},
+    "manual_inventory_days": {"is_integer": False, "text_format": ",.0f"},
+    "manual_stockout_pct": {"is_integer": False, "text_format": ",.1f"},
+    "manual_training_sessions": {"is_integer": True, "text_format": ",d"},
+    "manual_new_products": {"is_integer": True, "text_format": ",d"},
 }
 
 
@@ -1559,19 +1579,31 @@ def inject_mckinsey_style(
             box-shadow: var(--shadow-lg);
         }}
         footer [data-testid="stFooter"] a[href*="streamlit.io"] {{
+            position: fixed;
+            bottom: 1.5rem;
+            left: 1.5rem;
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
-            background: var(--surface-color);
-            border: 1px solid var(--border-subtle-color);
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: var(--radius-chip);
-            padding: 0.35rem 0.75rem;
-            color: var(--text-color);
+            padding: 0.35rem 0.85rem;
+            color: #ffffff;
+            box-shadow: var(--shadow-md);
+            opacity: 0.45;
+            z-index: 140;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }}
+        footer [data-testid="stFooter"] a[href*="streamlit.io"]:hover {{
+            opacity: 0.9;
+            transform: translateY(-2px);
         }}
         footer [data-testid="stFooter"] a[href*="streamlit.io"]::after {{
             content: attr(data-external-label);
             font-size: 0.75rem;
-            color: var(--muted-text-color);
+            color: rgba(255, 255, 255, 0.75);
+            margin-left: 0.25rem;
         }}
         .hero-panel {{
             background: linear-gradient(135deg, rgba(11,31,59,0.9), rgba(30,136,229,0.75));
@@ -2290,7 +2322,18 @@ def apply_accessibility_enhancements() -> None:
                 badge.setAttribute('aria-label', badgeLabel);
                 badge.setAttribute('title', badgeLabel);
                 badge.setAttribute('rel', 'noopener noreferrer');
+                badge.setAttribute('target', '_blank');
                 badge.setAttribute('data-external-label', badgeLabel);
+                if (!badge.dataset.confirmBound) {{
+                    badge.dataset.confirmBound = 'true';
+                    badge.addEventListener('click', (event) => {{
+                        const message = badgeLabel + ' を新しいタブで開きます。続行しますか？';
+                        if (!window.confirm(message)) {{
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
+                    }});
+                }}
             }}
             doc.querySelectorAll('button[data-testid^="baseButton"]').forEach((button) => {{
                 if (!button.getAttribute('aria-label')) {{
@@ -2335,6 +2378,242 @@ def remember_last_uploaded_files(
     if file_names:
         unique_names = list(dict.fromkeys(file_names))
         st.session_state["last_uploaded"] = unique_names
+
+
+def _ensure_upload_directory(category: str) -> Path:
+    """Ensure that the storage directory for a given upload category exists."""
+
+    root = UPLOAD_STORAGE_ROOT
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / category
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _build_upload_signature(uploaded_file: Any, category: str) -> Optional[str]:
+    """Generate a stable signature for an uploaded file."""
+
+    if uploaded_file is None:
+        return None
+    name = getattr(uploaded_file, "name", None)
+    if not name:
+        return None
+    safe_name = Path(str(name)).name
+    size = getattr(uploaded_file, "size", None)
+    if size is None:
+        try:
+            uploaded_file.seek(0, io.SEEK_END)
+            size = uploaded_file.tell()
+        except Exception:
+            size = None
+        finally:
+            try:
+                uploaded_file.seek(0)
+            except Exception:
+                pass
+    return f"{category}:{safe_name}:{size}"
+
+
+def persist_uploaded_artifact(
+    uploaded_file: Any,
+    *,
+    category: str,
+    label: Optional[str] = None,
+) -> Tuple[Optional[Path], bool, Optional[str]]:
+    """Persist an uploaded file to disk with a progress indicator."""
+
+    signature = _build_upload_signature(uploaded_file, category)
+    if signature is None:
+        return None, False, None
+
+    index = st.session_state.setdefault("_persisted_upload_index", {})
+    existing_path = index.get(signature)
+    if existing_path and Path(existing_path).exists():
+        metadata_index = st.session_state.setdefault("_persisted_upload_metadata", {})
+        if signature not in metadata_index:
+            metadata_index[signature] = {
+                "category": category,
+                "name": Path(existing_path).name,
+                "label": label or Path(existing_path).name,
+                "path": existing_path,
+                "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
+                "size": getattr(uploaded_file, "size", None),
+            }
+        return Path(existing_path), False, signature
+
+    destination_dir = _ensure_upload_directory(category)
+    safe_name = Path(getattr(uploaded_file, "name", "uploaded"))
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:10]
+    destination_path = destination_dir / f"{timestamp}_{digest}_{safe_name.name}"
+
+    total = getattr(uploaded_file, "size", None)
+    progress_placeholder = st.empty()
+    display_label = label or safe_name.name
+    progress = progress_placeholder.progress(0.0, text=f"「{display_label}」を保存しています…")
+    bytes_written = 0
+
+    try:
+        with destination_path.open("wb") as output:
+            while True:
+                chunk = uploaded_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+                bytes_written += len(chunk)
+                if total:
+                    progress_value = min(bytes_written / total, 0.995)
+                    progress.progress(progress_value, text=f"「{display_label}」を保存しています…")
+        progress.progress(1.0, text=f"「{display_label}」の保存が完了しました")
+    except Exception as exc:  # pragma: no cover - runtime safeguard
+        progress_placeholder.empty()
+        try:
+            destination_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+        st.error(f"ファイルの保存に失敗しました: {exc}")
+        return None, False, signature
+    finally:
+        progress_placeholder.empty()
+
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+
+    index[signature] = str(destination_path)
+    entry = {
+        "category": category,
+        "label": display_label,
+        "name": safe_name.name,
+        "path": str(destination_path),
+        "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "size": getattr(uploaded_file, "size", None),
+    }
+    metadata_index = st.session_state.setdefault("_persisted_upload_metadata", {})
+    metadata_index[signature] = entry
+
+    history = st.session_state.setdefault("upload_history", [])
+    history.insert(0, entry.copy())
+    st.session_state["upload_history"] = history[:MAX_UPLOAD_HISTORY]
+
+    st.success(f"「{display_label}」を保存しました。保存先: {destination_path}")
+    return destination_path, True, signature
+
+
+def update_upload_metadata(signature: Optional[str], **updates: Any) -> None:
+    """Update stored metadata for a persisted upload."""
+
+    if not signature:
+        return
+    metadata_index = st.session_state.setdefault("_persisted_upload_metadata", {})
+    entry = metadata_index.get(signature)
+    if not entry:
+        return
+    for key, value in updates.items():
+        if value is not None:
+            entry[key] = value
+    metadata_index[signature] = entry
+
+    for record in st.session_state.get("upload_history", []):
+        if record.get("path") == entry.get("path"):
+            for key, value in updates.items():
+                if value is not None:
+                    record[key] = value
+
+
+def list_saved_uploads(category: str) -> List[Dict[str, Any]]:
+    """Return saved upload entries filtered by category."""
+
+    history = st.session_state.get("upload_history", [])
+    return [entry for entry in history if entry.get("category") == category]
+
+
+def load_saved_upload(entry: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """Read a saved upload from disk into a DataFrame."""
+
+    path = Path(entry.get("path", ""))
+    if not path.exists():
+        st.warning(f"保存済みファイル『{entry.get('name', path.name)}』が見つかりません。")
+        return None
+
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".csv":
+            return pd.read_csv(path)
+        if suffix in {".xlsx", ".xls"}:
+            return pd.read_excel(path)
+        if suffix == ".json":
+            return pd.read_json(path)
+    except Exception as exc:  # pragma: no cover - runtime safeguard
+        st.error(f"保存済みファイルの読み込みに失敗しました: {exc}")
+        return None
+
+    st.warning("現在のところ、このファイル形式の再利用には対応していません。")
+    return None
+
+
+def collect_dashboard_settings() -> Dict[str, Any]:
+    """現在のフィルタやシナリオ設定をJSON化して返す。"""
+
+    filters = {
+        key: st.session_state.get(FILTER_STATE_KEYS[key])
+        for key in ("store", "channels", "categories", "period", "freq")
+    }
+    manual_inputs = {
+        key: st.session_state.get(key)
+        for key in MANUAL_INPUT_FORMATS.keys()
+    }
+    scenarios = st.session_state.get("scenario_inputs", [])
+    scenario_defaults = st.session_state.get("scenario_form_defaults", {})
+    saved_sales = st.session_state.get("active_saved_sales", [])
+    return {
+        "filters": filters,
+        "manual_inputs": manual_inputs,
+        "scenarios": scenarios,
+        "scenario_defaults": scenario_defaults,
+        "saved_sales_paths": saved_sales,
+    }
+
+
+def apply_dashboard_settings(settings: Dict[str, Any]) -> None:
+    """保存された設定をセッションに反映する。"""
+
+    filters = settings.get("filters", {})
+    for name in ("store", "channels", "categories", "period", "freq"):
+        if name in filters:
+            set_state_and_widget(FILTER_STATE_KEYS[name], filters[name])
+
+    manual_inputs = settings.get("manual_inputs", {})
+    for key, value in manual_inputs.items():
+        if value is None or key not in MANUAL_INPUT_FORMATS:
+            continue
+        config = MANUAL_INPUT_FORMATS[key]
+        st.session_state[key] = value
+        spinner_key = f"{key}_spinner"
+        text_key = f"{key}_text"
+        st.session_state[spinner_key] = value
+        st.session_state[text_key] = _format_numeric_text(
+            value,
+            is_integer=config.get("is_integer", False),
+            text_format=config.get("text_format"),
+        )
+
+    scenarios = settings.get("scenarios")
+    if isinstance(scenarios, list):
+        st.session_state["scenario_inputs"] = scenarios
+
+    defaults = settings.get("scenario_defaults")
+    if isinstance(defaults, dict):
+        st.session_state["scenario_form_defaults"] = defaults
+
+    saved_sales_paths = settings.get("saved_sales_paths")
+    if isinstance(saved_sales_paths, (list, tuple, set)):
+        st.session_state["active_saved_sales"] = list(saved_sales_paths)
 
 
 @st.cache_data(ttl=24 * 60 * 60)
@@ -2660,6 +2939,54 @@ def load_data(
     if automated_reports:
         for report in automated_reports:
             validation_report.extend(report)
+
+    active_saved_sales = st.session_state.get("active_saved_sales", set())
+    if isinstance(active_saved_sales, list):
+        active_saved_sales = set(active_saved_sales)
+    saved_sales_cache: Dict[str, Dict[str, Any]] = st.session_state.setdefault(
+        "_saved_sales_cache", {}
+    )
+    cleaned_paths: set = set()
+    for path_str in list(active_saved_sales):
+        path = Path(path_str)
+        try:
+            stat_info = path.stat()
+        except OSError:
+            validation_report.add_message(
+                "warning",
+                f"保存済みファイル {path_str} が見つからなかったため読み込みをスキップしました。",
+            )
+            continue
+
+        current_mtime = stat_info.st_mtime
+        cached_entry = saved_sales_cache.get(path_str)
+        if (
+            cached_entry
+            and cached_entry.get("mtime") == current_mtime
+            and cached_entry.get("data") is not None
+        ):
+            saved_df = cached_entry.get("data")
+            saved_report = cached_entry.get("report")
+        else:
+            with path.open("rb") as handle:
+                saved_df, saved_report = load_sales_workbook(handle)
+            saved_sales_cache[path_str] = {
+                "data": saved_df,
+                "report": saved_report,
+                "mtime": current_mtime,
+                "size": stat_info.st_size,
+            }
+
+        if isinstance(saved_report, ValidationReport):
+            validation_report.extend(saved_report)
+        if isinstance(saved_df, pd.DataFrame) and not saved_df.empty:
+            sales_frames.append(saved_df)
+            cleaned_paths.add(path_str)
+
+    stale_cache_keys = set(saved_sales_cache.keys()) - cleaned_paths
+    for stale_path in stale_cache_keys:
+        saved_sales_cache.pop(stale_path, None)
+    st.session_state["active_saved_sales"] = list(cleaned_paths)
 
     sales_df = pd.concat(sales_frames, ignore_index=True) if sales_frames else pd.DataFrame()
     cost_df = pd.concat(cost_frames, ignore_index=True) if cost_frames else pd.DataFrame()
@@ -3803,6 +4130,12 @@ def render_plan_step_sales(state: Dict[str, Any], context: Dict[str, Any]) -> Tu
                 key="plan_sales_upload",
                 help="勘定奉行やfreeeなどの会計ソフトから出力したCSVをアップロードすると自動でマッピングされます。",
             )
+            if uploaded is not None:
+                persist_uploaded_artifact(
+                    uploaded,
+                    category="plan_sales",
+                    label=getattr(uploaded, "name", "plan_sales"),
+                )
             download_button_from_df(
                 "売上計画テンプレートをダウンロード",
                 get_plan_sales_template(),
@@ -4017,6 +4350,12 @@ def render_plan_step_expenses(state: Dict[str, Any], context: Dict[str, Any]) ->
                 key="plan_expense_upload",
                 help="freeeや弥生会計などから出力した経費CSVをアップロードすると自動でマッピングします。",
             )
+            if uploaded is not None:
+                persist_uploaded_artifact(
+                    uploaded,
+                    category="plan_expense",
+                    label=getattr(uploaded, "name", "plan_expense"),
+                )
             download_button_from_df(
                 "経費計画テンプレートをダウンロード",
                 get_plan_expense_template(),
@@ -7018,7 +7357,12 @@ def render_gross_tab(
                     )
 
 
-def render_store_comparison_chart(analysis_df: pd.DataFrame, fixed_cost: float) -> None:
+def render_store_comparison_chart(
+    analysis_df: pd.DataFrame,
+    fixed_cost: float,
+    *,
+    selected_store: Optional[str] = None,
+) -> None:
     """店舗別の売上・粗利・営業利益(推計)を横棒で比較表示する。"""
 
     if analysis_df is None or analysis_df.empty:
@@ -7065,6 +7409,11 @@ def render_store_comparison_chart(analysis_df: pd.DataFrame, fixed_cost: float) 
 
     melted["metric_label"] = melted["metric"].map(metric_map)
     color_sequence = [SALES_SERIES_COLOR, GROSS_SERIES_COLOR, OPERATING_SERIES_COLOR]
+    chart_title = (
+        f"{selected_store}の売上・利益比較"
+        if selected_store
+        else "店舗別売上・利益比較"
+    )
     comparison_chart = px.bar(
         melted,
         x="value",
@@ -7077,6 +7426,7 @@ def render_store_comparison_chart(analysis_df: pd.DataFrame, fixed_cost: float) 
     )
     comparison_chart = apply_chart_theme(comparison_chart)
     comparison_chart.update_layout(
+        title=chart_title,
         legend=dict(title="指標", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
         xaxis_title="金額（円）",
         yaxis_title="店舗",
@@ -7182,11 +7532,11 @@ def render_inventory_heatmap(
     """店舗×カテゴリの在庫状況をヒートマップで表示する。"""
 
     if merged_df is None or merged_df.empty:
-        st.info("在庫ヒートマップを表示するデータがありません。")
+        st.info("在庫ヒートマップを準備中です。元データのアップロードをお待ちください。")
         return
     required_columns = {"store", "category", "estimated_cost"}
     if not required_columns.issubset(merged_df.columns):
-        st.info("店舗別・カテゴリ別の在庫を推計するための列が不足しています。")
+        st.info("在庫推計に必要な列が不足しています。データ整備が完了次第、自動で表示されます。")
         return
 
     turnover_days = None
@@ -7199,7 +7549,7 @@ def render_inventory_heatmap(
         merged_df.groupby(["store", "category"])["estimated_cost"].sum().reset_index()
     )
     if inventory_value.empty:
-        st.info("在庫を推計できるカテゴリデータがありません。")
+        st.info("カテゴリ別の在庫データを準備中です。もうしばらくお待ちください。")
         return
 
     inventory_value["推定在庫金額"] = (
@@ -7209,7 +7559,7 @@ def render_inventory_heatmap(
         index="store", columns="category", values="推定在庫金額"
     ).fillna(0.0)
     if heatmap_source.empty:
-        st.info("在庫ヒートマップを表示するデータが不足しています。")
+        st.info("在庫ヒートマップのデータが揃っていません。準備完了までしばらくお待ちください。")
         return
 
     fig = go.Figure(
@@ -7315,7 +7665,7 @@ def render_inventory_tab(
         )
         st.markdown("</div>", unsafe_allow_html=True)
     else:
-        st.info("在庫関連KPIの履歴がありません。")
+        st.info("在庫指標を準備中です。必要なデータが揃い次第こちらに表示されます。")
 
     if merged_df is not None and not merged_df.empty:
         st.markdown("<div class='chart-section'>", unsafe_allow_html=True)
@@ -7367,7 +7717,7 @@ def render_inventory_tab(
                 f"在庫数量が最も多いカテゴリは{top_category['category']}で、構成比は{top_category['構成比']:.1%}です。"
             )
         else:
-            chart_cols[0].info("カテゴリ別の販売数量が算出できませんでした。")
+            chart_cols[0].info("カテゴリ別の在庫情報を準備中です。元データを確認してください。")
 
         product_qty = (
             merged_df.groupby("product_name")["quantity"].sum().reset_index().sort_values("quantity", ascending=False).head(10)
@@ -7412,7 +7762,7 @@ def render_inventory_tab(
                 f"在庫数量が最も多い商品は{top_product['product_name']}で、構成比は{top_product['構成比']:.1%}です。"
             )
         else:
-            chart_cols[1].info("商品別の販売数量が算出できませんでした。")
+            chart_cols[1].info("商品別の在庫情報を準備中です。データが揃い次第更新されます。")
         st.markdown(
             "<div class='chart-section__header'><div class='chart-section__title'>在庫ヒートマップ</div></div>",
             unsafe_allow_html=True,
@@ -7422,7 +7772,7 @@ def render_inventory_tab(
 
     with st.expander("在庫推計テーブル", expanded=False):
         if merged_df is None or merged_df.empty:
-            st.info("データがありません。")
+            st.info("在庫推計データを準備中です。アップロード状況をご確認ください。")
         else:
             detail_df = (
                 merged_df.groupby(["product_code", "product_name", "category"])
@@ -8622,6 +8972,65 @@ def render_scenario_share_controls(
         st.markdown(f"[メールで共有する](mailto:?subject=Scenario%20Share&body={mail_body})")
 
 
+def render_scenario_radar_chart(summary_df: Optional[pd.DataFrame]) -> None:
+    """KPIのレーダーチャートで複数シナリオを比較表示する。"""
+
+    if summary_df is None or summary_df.empty:
+        return
+    metric_candidates = ["年間売上", "年間利益", "期末キャッシュ", "成長率(%)", "利益率(%)"]
+    metrics = [metric for metric in metric_candidates if metric in summary_df.columns]
+    if len(metrics) < 3 or "シナリオ" not in summary_df.columns:
+        return
+
+    normalized = summary_df[["シナリオ"] + metrics].copy()
+    percentage_metrics = {metric for metric in metrics if "(%)" in metric}
+    for metric in metrics:
+        series = pd.to_numeric(normalized[metric], errors="coerce")
+        max_val = series.max()
+        min_val = series.min()
+        if pd.isna(max_val):
+            normalized[metric] = 0.0
+        elif max_val == min_val:
+            normalized[metric] = 100.0
+        else:
+            normalized[metric] = ((series - min_val) / (max_val - min_val) * 100).fillna(0.0)
+
+    categories = metrics + [metrics[0]]
+    fig = go.Figure()
+
+    for idx, row in normalized.iterrows():
+        scaled_values = [float(row[metric]) for metric in metrics]
+        scaled_values.append(scaled_values[0])
+        actual_row = summary_df.loc[idx, metrics]
+        hover_lines = []
+        for metric in metrics:
+            value = actual_row[metric]
+            if metric in percentage_metrics:
+                hover_lines.append(f"{metric}: {value:,.1f}%")
+            else:
+                hover_lines.append(f"{metric}: {value:,.0f}")
+        fig.add_trace(
+            go.Scatterpolar(
+                r=scaled_values,
+                theta=categories,
+                name=str(summary_df.loc[idx, "シナリオ"]),
+                fill="toself",
+                hovertemplate="<br>".join(hover_lines) + "<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(range=[0, 100], showticklabels=False, gridcolor="rgba(15,23,42,0.08)")
+        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5),
+        margin=dict(l=40, r=40, t=60, b=30),
+    )
+
+    st.markdown("### KPIレーダーチャート")
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_shared_scenario_preview() -> None:
     """共有リンクから読み込んだシナリオ比較結果を表示する。"""
 
@@ -8887,6 +9296,12 @@ def render_scenario_analysis_section(
         uploaded_file = st.file_uploader(
             "シナリオ用の売上データをアップロード", type=["csv", "xlsx"], key="scenario_file_uploader"
         )
+        if uploaded_file is not None:
+            persist_uploaded_artifact(
+                uploaded_file,
+                category="scenario",
+                label=getattr(uploaded_file, "name", "scenario"),
+            )
         download_button_from_df(
             "シナリオ用サンプルCSVをダウンロード",
             get_sample_sales_template(limit=200),
@@ -8904,6 +9319,26 @@ def render_scenario_analysis_section(
                 st.success("アップロードしたデータをシナリオ基礎データとして設定しました。")
             except Exception as exc:  # pragma: no cover - runtime保護
                 st.error(f"データの読み込みに失敗しました: {exc}")
+
+        saved_scenarios = list_saved_uploads("scenario")
+        if saved_scenarios:
+            option_map = {
+                f"{entry['label']} ({entry['saved_at']})": entry for entry in saved_scenarios
+            }
+            saved_labels = ["保存済みデータを読み込まない"] + list(option_map.keys())
+            selected_saved = st.selectbox(
+                "保存済みのシナリオデータ",
+                saved_labels,
+                key="scenario_saved_select",
+            )
+            if selected_saved in option_map:
+                entry = option_map[selected_saved]
+                saved_df = load_saved_upload(entry)
+                if saved_df is not None and not saved_df.empty:
+                    st.session_state["scenario_uploaded_df"] = normalize_scenario_input(saved_df)
+                    st.success(f"保存済みファイル『{entry['name']}』を読み込みました。")
+                st.session_state["scenario_saved_select"] = saved_labels[0]
+                trigger_rerun()
 
         if st.button("現在のダッシュボードデータを基準にする", key="scenario_use_dashboard"):
             normalized_df = normalize_scenario_input(merged_df)
@@ -9233,6 +9668,33 @@ def render_scenario_analysis_section(
                     )
                 )
 
+                render_scenario_radar_chart(summary_df)
+
+                export_cols = st.columns(3)
+                with export_cols[0]:
+                    download_button_from_df("比較サマリーCSV", summary_df, "scenario_summary.csv")
+                with export_cols[1]:
+                    download_excel_from_df("比較サマリーExcel", summary_df, "scenario_summary.xlsx")
+                with export_cols[2]:
+                    if REPORTLAB_AVAILABLE:
+                        download_pdf_from_df(
+                            "比較サマリーPDF",
+                            summary_df,
+                            "scenario_summary.pdf",
+                            title="シナリオ比較サマリー",
+                        )
+                    else:
+                        st.button(
+                            "比較サマリーPDF",
+                            disabled=True,
+                            help="reportlabパッケージをインストールするとPDF出力が利用できます。",
+                        )
+                        st.caption(
+                            "PDF出力には外部パッケージreportlabが必要です。"
+                            " サーバー環境にインストールできない場合はExcelエクスポートをご利用ください。"
+                        )
+                        st.caption("pip install reportlab で追加できます。")
+
                 sales_chart = alt.Chart(combined_df).mark_line().encode(
                     x=alt.X("period:T", title="期間"),
                     y=alt.Y("sales:Q", title="売上高"),
@@ -9427,6 +9889,20 @@ def render_sidebar_upload_expander(
             label_visibility="collapsed",
             help=help_text,
         )
+        if uploaded:
+            if multiple:
+                for item in uploaded:
+                    persist_uploaded_artifact(
+                        item,
+                        category=uploader_key,
+                        label=getattr(item, "name", uploader_key),
+                    )
+            else:
+                persist_uploaded_artifact(
+                    uploaded,
+                    category=uploader_key,
+                    label=getattr(uploaded, "name", uploader_key),
+                )
         if sample_generator is not None:
             try:
                 sample_df = sample_generator()
@@ -9526,7 +10002,53 @@ def render_sales_upload_wizard(
         else:
             uploaded_files = []
 
+        signature_index: Dict[str, Optional[str]] = {}
+        for uploaded_file in uploaded_files:
+            _, _, signature = persist_uploaded_artifact(
+                uploaded_file,
+                category="sales",
+                label=getattr(uploaded_file, "name", "sales"),
+            )
+            if signature:
+                signature_index[getattr(uploaded_file, "name", "")] = signature
+
         st.caption(UPLOAD_META_MULTIPLE)
+
+        saved_entries = list_saved_uploads("sales")
+        if saved_entries:
+            option_map = {
+                f"{entry['label']} ({entry['saved_at']})": entry for entry in saved_entries
+            }
+            saved_labels = ["保存済みファイルを追加しない"] + list(option_map.keys())
+            selected_saved = st.selectbox(
+                "保存済みファイルを利用",
+                saved_labels,
+                key="sales_saved_select",
+            )
+            if selected_saved in option_map:
+                entry = option_map[selected_saved]
+                active_saved = set(st.session_state.get("active_saved_sales", []))
+                if entry["path"] not in active_saved:
+                    active_saved.add(entry["path"])
+                    st.session_state["active_saved_sales"] = list(active_saved)
+                    st.success(
+                        f"保存済みファイル『{entry['name']}』を取り込み対象に追加しました。"
+                    )
+                else:
+                    st.info("選択した保存済みファイルは既に追加されています。")
+                st.session_state["sales_saved_select"] = saved_labels[0]
+                trigger_rerun()
+
+            active_saved = st.session_state.get("active_saved_sales", [])
+            if active_saved:
+                summary = ", ".join(Path(path).name for path in active_saved[:3])
+                if len(active_saved) > 3:
+                    summary += f" 他{len(active_saved) - 3}件"
+                st.caption(f"保存済みファイル: {summary}")
+                if st.button("保存済みファイルの割当をクリア", key="clear_saved_sales"):
+                    st.session_state["active_saved_sales"] = []
+                    st.success("保存済みファイルの選択をクリアしました。")
+                    trigger_rerun()
 
         with st.expander("チャネル別サンプルフォーマットを確認"):
             for config in configs:
@@ -9584,10 +10106,14 @@ def render_sales_upload_wizard(
                     channel_files[selection].append(uploaded_file)
                     assignments[file_name] = selection
                     assigned_label = selection
+                    update_upload_metadata(
+                        signature_index.get(file_name), channel=selection
+                    )
                 else:
                     assignments.pop(file_name, None)
                     assigned_label = "未割当"
                     unassigned_count += 1
+                    update_upload_metadata(signature_index.get(file_name), channel=None)
 
                 preview_rows.append(
                     {
@@ -9816,6 +10342,30 @@ def main() -> None:
         if len(last_uploaded) > 3:
             preview += f" 他{len(last_uploaded) - 3}件"
         st.sidebar.caption(f"前回アップロード: {preview}")
+
+    with st.sidebar.expander("設定の保存・読み込み", expanded=False):
+        st.caption("現在のフィルタや手入力KPI、シナリオをJSONとして保存・復元できます。")
+        settings_payload = json.dumps(collect_dashboard_settings(), ensure_ascii=False, indent=2)
+        st.download_button(
+            "現在の設定をダウンロード",
+            settings_payload.encode("utf-8"),
+            file_name="dashboard_settings.json",
+            mime="application/json",
+        )
+        uploaded_settings = st.file_uploader(
+            "保存した設定ファイルを読み込む",
+            type="json",
+            key="dashboard_settings_loader",
+        )
+        if uploaded_settings is not None:
+            try:
+                loaded_settings = json.load(uploaded_settings)
+            except json.JSONDecodeError as exc:
+                st.error(f"設定ファイルの読み込みに失敗しました: {exc}")
+            else:
+                apply_dashboard_settings(loaded_settings)
+                st.success("保存された設定を反映しました。")
+                trigger_rerun()
 
     if "api_sales_data" not in st.session_state:
         st.session_state["api_sales_data"] = {}
@@ -10881,7 +11431,11 @@ def main() -> None:
                 st.dataframe(yoy_table)
 
             st.markdown("### 店舗別売上・利益比較")
-            render_store_comparison_chart(analysis_df, fixed_cost)
+            render_store_comparison_chart(
+                analysis_df,
+                fixed_cost,
+                selected_store=st.session_state.get(FILTER_STATE_KEYS["store"]),
+            )
 
             st.markdown("### ABC分析（売上上位30商品）")
             render_abc_analysis(analysis_df)
