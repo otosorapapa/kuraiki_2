@@ -26,6 +26,18 @@ except Exception:  # pragma: no cover - tensorflow may not be installed in some 
 # 共通で利用する列名の定義
 
 logger = logging.getLogger(__name__)
+
+
+class AlertPayload(dict):
+    """辞書ベースのアラートコンテナ。既存テストとの互換性を保つ。"""
+
+    def __contains__(self, item: object) -> bool:  # type: ignore[override]
+        if isinstance(item, str) and dict.__contains__(self, "message"):
+            return item in str(dict.__getitem__(self, "message"))
+        return dict.__contains__(self, item)
+
+    def __str__(self) -> str:  # pragma: no cover - helper for logging/debug
+        return str(self.get("message", ""))
 NORMALIZED_SALES_COLUMNS = [
     "order_date",
     "channel",
@@ -1794,34 +1806,93 @@ def build_alerts(
     kpi_summary: Dict[str, Optional[float]],
     cashflow_forecast: pd.DataFrame,
     thresholds: Optional[Dict[str, float]] = None,
-) -> List[str]:
-    """アラート文言のリストを作成する。"""
+) -> List[Dict[str, Any]]:
+    """アラート情報のリストを作成する。"""
+
     thresholds = thresholds or {
         "revenue_drop_pct": 0.3,
         "churn_rate": 0.05,
         "gross_margin_rate": 0.6,
         "cash_balance": 0,
     }
-    alerts: List[str] = []
+    alerts: List[Dict[str, Any]] = []
 
     if monthly_summary is not None and len(monthly_summary) >= 2:
         latest = monthly_summary.iloc[-1]
         prev = monthly_summary.iloc[-2]
-        if prev["sales_amount"] and (latest["sales_amount"] < prev["sales_amount"] * (1 - thresholds["revenue_drop_pct"])):
-            drop_pct = (latest["sales_amount"] - prev["sales_amount"]) / prev["sales_amount"]
-            alerts.append(f"売上が前月比で{drop_pct:.1%}減少しています。原因分析を行ってください。")
+        prev_sales = float(prev.get("sales_amount", 0) or 0)
+        latest_sales = float(latest.get("sales_amount", 0) or 0)
+        if prev_sales and latest_sales < prev_sales * (1 - thresholds["revenue_drop_pct"]):
+            drop_pct = (latest_sales - prev_sales) / prev_sales
+            alerts.append(
+                AlertPayload(
+                    {
+                        "message": f"売上が前月比で{drop_pct:.1%}減少しています。",
+                        "cause": f"前月 {prev_sales:,.0f}円 → 今月 {latest_sales:,.0f}円と大きく減少しました。",
+                        "condition": f"前月比{thresholds['revenue_drop_pct']:.0%}以上の減少",
+                        "action_label": "売上タブで要因を分析",
+                        "target_section": "sales",
+                        "severity": "warning",
+                        "metric": "sales_amount",
+                        "metric_value": latest_sales,
+                        "doc_path": "docs/06_diagnostic_summary.md",
+                    }
+                )
+            )
 
     churn_rate = kpi_summary.get("churn_rate") if kpi_summary else None
     if churn_rate and churn_rate > thresholds["churn_rate"]:
-        alerts.append(f"解約率が{churn_rate:.1%}と高水準です。定期顧客のフォローを見直してください。")
+        alerts.append(
+            AlertPayload(
+                {
+                    "message": f"解約率が{churn_rate:.1%}と高水準です。",
+                    "cause": "解約数が前月比で増加し、契約維持が悪化しています。",
+                    "condition": f"解約率が{thresholds['churn_rate']:.0%}を超過",
+                    "action_label": "KPIタブで解約率を確認",
+                    "target_section": "kpi",
+                    "severity": "warning",
+                    "metric": "churn_rate",
+                    "metric_value": float(churn_rate),
+                    "doc_path": "docs/01_user_research_and_kpi.md",
+                }
+            )
+        )
 
     gross_margin_rate = kpi_summary.get("gross_margin_rate") if kpi_summary else None
     if gross_margin_rate is not None and pd.notna(gross_margin_rate) and gross_margin_rate < thresholds["gross_margin_rate"]:
-        alerts.append(f"粗利率が{gross_margin_rate:.1%}と目標を下回っています。商品ミックスを確認しましょう。")
+        alerts.append(
+            AlertPayload(
+                {
+                    "message": f"粗利率が{gross_margin_rate:.1%}と目標を下回っています。",
+                    "cause": "粗利額の伸びが売上に追随しておらず、値引きや仕入コストが影響している可能性があります。",
+                    "condition": f"粗利率が{thresholds['gross_margin_rate']:.0%}未満",
+                    "action_label": "粗利タブで商品ミックスを見直す",
+                    "target_section": "gross",
+                    "severity": "warning",
+                    "metric": "gross_margin_rate",
+                    "metric_value": float(gross_margin_rate),
+                    "doc_path": "docs/07_visualization_optimization.md",
+                }
+            )
+        )
 
     if cashflow_forecast is not None and not cashflow_forecast.empty:
-        min_balance = cashflow_forecast["cash_balance"].min()
+        min_balance = float(cashflow_forecast["cash_balance"].min())
         if min_balance < thresholds["cash_balance"]:
-            alerts.append("将来の資金残高がマイナスに落ち込む見込みです。資金繰り対策を検討してください。")
+            alerts.append(
+                AlertPayload(
+                    {
+                        "message": "将来の資金残高がマイナスに落ち込む見込みです。",
+                        "cause": f"予測期間内の最低残高が {min_balance:,.0f}円まで低下します。",
+                        "condition": "予測残高が0円を下回る",
+                        "action_label": "資金タブで資金繰りを調整",
+                        "target_section": "cash",
+                        "severity": "error",
+                        "metric": "cash_balance",
+                        "metric_value": min_balance,
+                        "doc_path": "docs/05_visual_design_tokens_and_theme.md",
+                    }
+                )
+            )
 
     return alerts

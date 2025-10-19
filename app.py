@@ -694,17 +694,17 @@ TUTORIAL_INDEX: List[Dict[str, Any]] = [
 ]
 
 
-PRIMARY_COLOR = "#0B3C8C"
-SECONDARY_COLOR = "#1E293B"
-ACCENT_COLOR = "#2563EB"
-BACKGROUND_COLOR = "#F8FAFC"
-SURFACE_COLOR = "#FFFFFF"
+PRIMARY_COLOR = "#0F4C81"
+SECONDARY_COLOR = "#0B2E59"
+ACCENT_COLOR = "#1B9AAA"
+BACKGROUND_COLOR = "#FFFFFF"
+SURFACE_COLOR = "#F1F5F9"
 SUCCESS_COLOR = "#0F766E"
 WARNING_COLOR = "#B45309"
 ERROR_COLOR = "#B91C1C"
 TEXT_COLOR = "#0F172A"
-CAPTION_TEXT_COLOR = "#475569"
-MUTED_TEXT_COLOR = SECONDARY_COLOR
+CAPTION_TEXT_COLOR = "#3F4C6B"
+MUTED_TEXT_COLOR = "#334155"
 LIGHT_THEME_TOKENS: Dict[str, str] = {
     "background": BACKGROUND_COLOR,
     "surface": SURFACE_COLOR,
@@ -712,10 +712,10 @@ LIGHT_THEME_TOKENS: Dict[str, str] = {
     "caption": CAPTION_TEXT_COLOR,
     "muted": MUTED_TEXT_COLOR,
     "border_subtle": "rgba(15,23,42,0.08)",
-    "border_strong": "rgba(15,23,42,0.22)",
+    "border_strong": "rgba(15,23,42,0.24)",
     "grid": "rgba(15,23,42,0.08)",
-    "domain": "rgba(15,23,42,0.2)",
-    "surface_tint": "rgba(15,23,42,0.05)",
+    "domain": "rgba(15,23,42,0.18)",
+    "surface_tint": "rgba(27,154,170,0.08)",
 }
 MCKINSEY_FONT_STACK = (
     "'Inter', 'Inter var', 'Source Sans 3', '-apple-system', 'BlinkMacSystemFont', "
@@ -730,6 +730,32 @@ NUMERIC_FONT_STACK = (
     "'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue', 'Arial', 'Noto Sans JP', sans-serif"
 )
 MONO_FONT_STACK = "'Roboto Mono', 'Source Code Pro', monospace"
+
+FONT_FAMILY_OPTIONS: List[Dict[str, str]] = [
+    {
+        "key": "mckinsey",
+        "label": "Inter / Source Sans (推奨)",
+        "body": MCKINSEY_FONT_STACK,
+        "alt": ALT_FONT_FAMILY,
+        "numeric": NUMERIC_FONT_STACK,
+    },
+    {
+        "key": "noto",
+        "label": "Noto Sans JP", 
+        "body": "'Noto Sans JP', 'Hiragino Sans', 'Segoe UI', sans-serif",
+        "alt": "'Noto Sans JP', 'Hiragino Sans', 'Segoe UI', sans-serif",
+        "numeric": "'Noto Sans JP', 'Hiragino Sans', 'Segoe UI', sans-serif",
+    },
+    {
+        "key": "system",
+        "label": "システムフォント",
+        "body": "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+        "alt": "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+        "numeric": "'Roboto Mono', 'Source Code Pro', monospace",
+    },
+]
+
+FONT_STACK_LOOKUP = {option["key"]: option for option in FONT_FAMILY_OPTIONS}
 
 COMPANY_LOGO_URL = "https://raw.githubusercontent.com/streamlit/brand/main/logos/mark/streamlit-mark-color.png"
 COLOR_TOKENS: Dict[str, str] = {
@@ -746,30 +772,38 @@ COLOR_TOKENS: Dict[str, str] = {
     "error": ERROR_COLOR,
 }
 
+CUSTOM_THEME_DEFAULT = {
+    "primary": PRIMARY_COLOR,
+    "accent": ACCENT_COLOR,
+    "background": BACKGROUND_COLOR,
+    "surface": SURFACE_COLOR,
+    "text": TEXT_COLOR,
+}
+
 DARK_THEME_VARIANTS: Dict[str, Dict[str, str]] = {
     "deep": {
-        "background": "#050B18",
-        "surface": "#111E2E",
-        "text": "#EEF3FF",
-        "caption": "#A8B5CB",
-        "muted": "#8FA5C6",
-        "border_subtle": "rgba(167,189,219,0.32)",
-        "border_strong": "rgba(199,214,238,0.6)",
-        "grid": "rgba(162,189,227,0.28)",
-        "domain": "rgba(176,204,240,0.45)",
-        "surface_tint": "rgba(90,126,173,0.22)",
+        "background": "#101623",
+        "surface": "#1E2534",
+        "text": "#F9FAFB",
+        "caption": "#CBD5F5",
+        "muted": "#9DA9C9",
+        "border_subtle": "rgba(203,213,225,0.2)",
+        "border_strong": "rgba(203,213,225,0.45)",
+        "grid": "rgba(148,163,184,0.25)",
+        "domain": "rgba(94,234,212,0.35)",
+        "surface_tint": "rgba(27,154,170,0.25)",
     },
     "high_contrast": {
-        "background": "#010409",
-        "surface": "#0C1A2A",
-        "text": "#F8FBFF",
-        "caption": "#D0DCF2",
-        "muted": "#9FB7DD",
-        "border_subtle": "rgba(120,178,255,0.45)",
-        "border_strong": "rgba(127,196,255,0.85)",
-        "grid": "rgba(147,200,255,0.45)",
-        "domain": "rgba(160,210,255,0.7)",
-        "surface_tint": "rgba(116,170,250,0.32)",
+        "background": "#0B0F17",
+        "surface": "#162032",
+        "text": "#FFFFFF",
+        "caption": "#E2E8F0",
+        "muted": "#BBC4E0",
+        "border_subtle": "rgba(224,242,254,0.36)",
+        "border_strong": "rgba(226,232,240,0.6)",
+        "grid": "rgba(148,163,184,0.32)",
+        "domain": "rgba(226,232,240,0.45)",
+        "surface_tint": "rgba(59,130,246,0.32)",
     },
 }
 
@@ -802,10 +836,14 @@ I18N_STRINGS: Dict[str, Dict[str, str]] = {
         "ja": "日本語/英語の表記とヘルプを切り替えます。",
         "en": "Switch between Japanese and English labels and help text.",
     },
-    "theme_toggle_label": {"ja": "ダークテーマ", "en": "Dark theme"},
-    "theme_toggle_help": {
-        "ja": "ライトテーマに切り替えると背景が明るい配色になります。",
-        "en": "Toggle to switch between light and dark color schemes.",
+    "theme_mode_label": {"ja": "テーマ", "en": "Theme"},
+    "theme_mode_help": {
+        "ja": "ライト・ダーク・カスタムの3種類から選択できます。",
+        "en": "Choose between light, dark, or custom colour presets.",
+    },
+    "theme_custom_caption": {
+        "ja": "カスタムテーマでは背景色やアクセントカラーを自由に設定できます。",
+        "en": "Custom themes let you fine-tune background and accent colours.",
     },
     "theme_caption": {
         "ja": "配色やフォントサイズを調整して見やすいダッシュボードにカスタマイズできます。",
@@ -831,6 +869,11 @@ I18N_STRINGS: Dict[str, Dict[str, str]] = {
     "palette_help": {
         "ja": "色覚多様性に配慮した配色に切り替えられます。",
         "en": "Choose palettes with improved color-vision accessibility.",
+    },
+    "font_family_label": {"ja": "フォントファミリー", "en": "Font family"},
+    "font_family_help": {
+        "ja": "見出しと本文で使用するフォントを切り替えます。",
+        "en": "Switch the font family used for headings and body text.",
     },
     "quick_search_title": {"ja": "クイック検索", "en": "Quick search"},
     "quick_search_placeholder": {
@@ -1046,8 +1089,30 @@ def get_font_scale() -> float:
     return float(st.session_state.get("ui_font_scale", 1.0))
 
 
+def get_active_font_stacks() -> Dict[str, str]:
+    """ユーザーが選択したフォントファミリー設定を返す。"""
+
+    ensure_theme_state_defaults()
+    choice_key = st.session_state.get("ui_font_choice", "mckinsey")
+    option = FONT_STACK_LOOKUP.get(choice_key) or FONT_STACK_LOOKUP["mckinsey"]
+    return option
+
+
 def get_active_chart_colorway() -> List[str]:
     """ユーザー設定に基づいたチャートの配色セットを返す。"""
+
+    mode = st.session_state.get("ui_theme_mode", "light")
+    if mode == "custom":
+        custom = st.session_state.get("ui_custom_theme", CUSTOM_THEME_DEFAULT.copy())
+        colors = [
+            custom.get("accent", ACCENT_COLOR),
+            custom.get("primary", PRIMARY_COLOR),
+            SUCCESS_COLOR,
+        ]
+        filtered = [color for color in colors if color]
+        if len(filtered) < 2:
+            filtered.append(SECONDARY_COLOR)
+        return filtered
 
     palette_key = st.session_state.get("ui_color_palette", DEFAULT_CHART_PALETTE_KEY)
     palette = COLOR_PALETTE_PRESETS.get(palette_key)
@@ -1062,6 +1127,25 @@ def get_active_chart_colorway() -> List[str]:
 def get_theme_tokens(*, dark_mode: bool, variant: Optional[str] = None) -> Dict[str, str]:
     """現在のテーマに応じたトークンセットを返す。"""
 
+    mode = st.session_state.get("ui_theme_mode", "light")
+    if mode == "custom":
+        custom = st.session_state.get("ui_custom_theme", CUSTOM_THEME_DEFAULT.copy())
+        tokens = LIGHT_THEME_TOKENS.copy()
+        tokens.update(
+            {
+                "background": custom.get("background", tokens["background"]),
+                "surface": custom.get("surface", tokens["surface"]),
+                "text": custom.get("text", tokens["text"]),
+                "caption": _rgba_from_hex(custom.get("text", tokens["caption"]), 0.75)
+                if custom.get("text")
+                else tokens["caption"],
+                "muted": _rgba_from_hex(custom.get("text", tokens["muted"]), 0.72)
+                if custom.get("text")
+                else tokens["muted"],
+            }
+        )
+        return tokens
+
     if not dark_mode:
         return LIGHT_THEME_TOKENS
     chosen = variant or st.session_state.get("ui_dark_variant", DEFAULT_DARK_THEME_VARIANT)
@@ -1071,11 +1155,14 @@ def get_theme_tokens(*, dark_mode: bool, variant: Optional[str] = None) -> Dict[
 def ensure_theme_state_defaults() -> None:
     """テーマ関連のセッションデフォルト値を設定する。"""
 
+    st.session_state.setdefault("ui_theme_mode", "light")
     st.session_state.setdefault("ui_color_palette", DEFAULT_CHART_PALETTE_KEY)
     st.session_state.setdefault("ui_dark_variant", DEFAULT_DARK_THEME_VARIANT)
     st.session_state.setdefault("ui_font_scale", 1.0)
     st.session_state.setdefault("ui_dark_palette_saved", DEFAULT_CHART_PALETTE_KEY)
     st.session_state.setdefault("ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT)
+    st.session_state.setdefault("ui_font_choice", "mckinsey")
+    st.session_state.setdefault("ui_custom_theme", CUSTOM_THEME_DEFAULT.copy())
 
 HEATMAP_BLUE_SCALE = [[0.0, "#E2E8F0"], [0.5, "#60A5FA"], [1.0, ACCENT_COLOR]]
 
@@ -1190,14 +1277,17 @@ def apply_chart_theme(fig):
     font_scale = get_font_scale()
     tokens = st.session_state.get("ui_active_tokens", LIGHT_THEME_TOKENS)
     colorway = get_active_chart_colorway()
+    fonts = get_active_font_stacks()
+    body_font = fonts["body"]
+    alt_font = fonts["alt"]
     body_px = _rem_to_px(TYPOGRAPHY_TOKENS["body"]["size"], font_scale)
     caption_px = _rem_to_px(TYPOGRAPHY_TOKENS["caption"]["size"], font_scale)
     title_px = _rem_to_px(TYPOGRAPHY_TOKENS["h2"]["size"], font_scale)
 
     fig.update_layout(
-        font=dict(family=MCKINSEY_FONT_STACK, color=tokens["text"], size=body_px),
+        font=dict(family=body_font, color=tokens["text"], size=body_px),
         title=dict(
-            font=dict(size=title_px, color=tokens["text"], family=MCKINSEY_FONT_STACK)
+            font=dict(size=title_px, color=tokens["text"], family=body_font)
         ),
         legend=dict(
             bgcolor="rgba(0,0,0,0)",
@@ -1208,7 +1298,7 @@ def apply_chart_theme(fig):
         margin=dict(l=48, r=36, t=60, b=48),
         hoverlabel=dict(
             font=dict(
-                family=MCKINSEY_FONT_STACK,
+                family=alt_font,
                 color=tokens["text"],
                 size=body_px,
             )
@@ -1241,6 +1331,9 @@ def apply_altair_theme(chart: alt.Chart) -> alt.Chart:
     font_scale = get_font_scale()
     tokens = st.session_state.get("ui_active_tokens", LIGHT_THEME_TOKENS)
     palette = get_active_chart_colorway()
+    fonts = get_active_font_stacks()
+    body_font = fonts["body"]
+    alt_font = fonts["alt"]
     axis_label_size = _rem_to_px(TYPOGRAPHY_TOKENS["body_small"]["size"], font_scale)
     axis_title_size = _rem_to_px(TYPOGRAPHY_TOKENS["body"]["size"], font_scale)
     legend_size = _rem_to_px(TYPOGRAPHY_TOKENS["body_small"]["size"], font_scale)
@@ -1248,8 +1341,8 @@ def apply_altair_theme(chart: alt.Chart) -> alt.Chart:
 
     return (
         chart.configure_axis(
-            labelFont=MCKINSEY_FONT_STACK,
-            titleFont=MCKINSEY_FONT_STACK,
+            labelFont=body_font,
+            titleFont=body_font,
             labelColor=tokens["muted"],
             titleColor=tokens["text"],
             labelFontSize=axis_label_size,
@@ -1258,8 +1351,8 @@ def apply_altair_theme(chart: alt.Chart) -> alt.Chart:
             domainColor=tokens["domain"],
         )
         .configure_legend(
-            titleFont=MCKINSEY_FONT_STACK,
-            labelFont=MCKINSEY_FONT_STACK,
+            titleFont=body_font,
+            labelFont=body_font,
             labelColor=tokens["text"],
             titleColor=tokens["muted"],
             titleFontSize=legend_size,
@@ -1271,12 +1364,12 @@ def apply_altair_theme(chart: alt.Chart) -> alt.Chart:
         .configure_range(category=palette, ordinal=palette)
         .configure_view(strokeOpacity=0)
         .configure_title(
-            font=MCKINSEY_FONT_STACK,
+            font=body_font,
             color=tokens["text"],
             fontSize=title_size,
         )
         .configure_mark(
-            font=MCKINSEY_FONT_STACK,
+            font=alt_font,
             color=palette[0],
             fill=palette[0],
             stroke=palette[0],
@@ -1300,6 +1393,17 @@ def inject_mckinsey_style(
     chart_colors = get_active_chart_colorway()
     chart_primary = chart_colors[0]
     chart_secondary = chart_colors[1] if len(chart_colors) > 1 else chart_colors[0]
+    fonts = get_active_font_stacks()
+    body_font = fonts["body"]
+    alt_font = fonts["alt"]
+    numeric_font = fonts["numeric"]
+    theme_mode = st.session_state.get("ui_theme_mode", "light")
+    custom_theme = st.session_state.get("ui_custom_theme", CUSTOM_THEME_DEFAULT.copy())
+    primary_color = custom_theme.get("primary", PRIMARY_COLOR) if theme_mode == "custom" else PRIMARY_COLOR
+    accent_color = custom_theme.get("accent", ACCENT_COLOR) if theme_mode == "custom" else ACCENT_COLOR
+    surface_color = custom_theme.get("surface", tokens["surface"]) if theme_mode == "custom" else tokens["surface"]
+    background_color = custom_theme.get("background", tokens["background"]) if theme_mode == "custom" else tokens["background"]
+    text_color = custom_theme.get("text", tokens["text"]) if theme_mode == "custom" else tokens["text"]
 
     typography_scaled = {
         "h1": _scaled_rem(TYPOGRAPHY_TOKENS["h1"]["size"], resolved_font_scale),
@@ -1312,9 +1416,9 @@ def inject_mckinsey_style(
         f"""
         <style>
         :root {{
-            --primary-color: {PRIMARY_COLOR};
+            --primary-color: {primary_color};
             --secondary-color: {SECONDARY_COLOR};
-            --accent-color: {ACCENT_COLOR};
+            --accent-color: {accent_color};
             --success-color: {SUCCESS_COLOR};
             --warning-color: {WARNING_COLOR};
             --error-color: {ERROR_COLOR};
@@ -1324,9 +1428,9 @@ def inject_mckinsey_style(
             --success-surface: {SUCCESS_SURFACE_COLOR};
             --warning-surface: {WARNING_SURFACE_COLOR};
             --error-surface: {ERROR_SURFACE_COLOR};
-            --surface-color: {tokens['surface']};
-            --background-color: {tokens['background']};
-            --text-color: {tokens['text']};
+            --surface-color: {surface_color};
+            --background-color: {background_color};
+            --text-color: {text_color};
             --muted-text-color: {tokens['muted']};
             --caption-text-color: {tokens['caption']};
             --border-subtle-color: {tokens['border_subtle']};
@@ -1334,9 +1438,9 @@ def inject_mckinsey_style(
             --surface-tint-color: {tokens['surface_tint']};
             --grid-color: {tokens['grid']};
             --domain-color: {tokens['domain']};
-            --font-family: {MCKINSEY_FONT_STACK};
-            --alt-font-family: {ALT_FONT_FAMILY};
-            --numeric-font-family: {NUMERIC_FONT_STACK};
+            --font-family: {body_font};
+            --alt-font-family: {alt_font};
+            --numeric-font-family: {numeric_font};
             --h1-size: {typography_scaled['h1']};
             --h1-line-height: {TYPOGRAPHY_TOKENS['h1']['line_height']};
             --h2-size: {typography_scaled['h2']};
@@ -1528,30 +1632,6 @@ def inject_mckinsey_style(
             font-weight: 600;
             border-radius: var(--radius-input);
             padding: 0.75rem 1.5rem;
-        }}
-        .main-nav-tabs {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 0.6rem;
-        }}
-        .main-nav-tabs .stButton > button {{
-            border-radius: 999px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-            padding: 0.65rem 1.25rem;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }}
-        .main-nav-tabs .stButton > button[data-testid="baseButton-secondary"] {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-subtle-color);
-            color: var(--muted-text-color);
-        }}
-        .main-nav-tabs .stButton > button[data-testid="baseButton-secondary"]:hover {{
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-sm);
-        }}
-        .main-nav-tabs .stButton > button[data-testid="baseButton-primary"] {{
-            box-shadow: var(--shadow-md);
         }}
         .stButton button:focus-visible, .stDownloadButton button:focus-visible {{
             outline: 3px solid var(--accent-color);
@@ -1958,6 +2038,11 @@ def inject_mckinsey_style(
             background: var(--warning-surface);
             border-color: rgba(var(--warning-rgb), 0.35);
             color: var(--warning-color);
+        }}
+        .alert-banner--error {{
+            background: var(--error-surface);
+            border-color: rgba(var(--error-rgb), 0.35);
+            color: var(--error-color);
         }}
         .alert-banner__title {{
             display: inline-flex;
@@ -5640,30 +5725,22 @@ def enhanced_number_input(
 def render_navigation() -> Tuple[str, str]:
     """トップレベルのナビゲーションを描画し、選択されたキーと表示ラベルを返す。"""
 
-    label_options = list(NAV_OPTION_LOOKUP.values())
-    label_to_key = {value: key for key, value in NAV_OPTION_LOOKUP.items()}
-
     current_key = st.session_state.get("main_nav", PRIMARY_NAV_ITEMS[0]["key"])
     if current_key not in NAV_OPTION_LOOKUP:
         current_key = PRIMARY_NAV_ITEMS[0]["key"]
-    selected_key = current_key
-    selected_label = NAV_OPTION_LOOKUP[selected_key]
 
-    st.markdown("<div class='main-nav-tabs'>", unsafe_allow_html=True)
-    nav_columns = st.columns(len(label_options))
-    for idx, label in enumerate(label_options):
-        key = label_to_key[label]
-        is_active = key == selected_key
-        button_pressed = nav_columns[idx].button(
-            label,
-            key=f"main_nav_tab_{key}",
-            use_container_width=True,
-            type="primary" if is_active else "secondary",
-        )
-        if button_pressed:
-            selected_key = key
-            selected_label = label
-    st.markdown("</div>", unsafe_allow_html=True)
+    options = list(NAV_OPTION_LOOKUP.keys())
+    default_index = options.index(current_key) if current_key in options else 0
+    selected_key = st.radio(
+        "メインナビゲーション",
+        options,
+        index=default_index,
+        key="main_nav_radio",
+        horizontal=True,
+        label_visibility="collapsed",
+        format_func=lambda key: NAV_OPTION_LOOKUP.get(key, key),
+    )
+    selected_label = NAV_OPTION_LOOKUP[selected_key]
 
     st.session_state["main_nav"] = selected_key
     st.session_state["main_nav_display"] = selected_label
@@ -5741,21 +5818,86 @@ def render_hero_section(
     )
 
 
-def render_status_banner(alerts: Optional[List[str]]) -> None:
+def render_status_banner(alerts: Optional[List[Dict[str, Any]]]) -> None:
     """アラート状況をアクセントカラーで表示する。"""
 
     if alerts:
-        items = "".join(f"<li>{html.escape(msg)}</li>" for msg in alerts)
-        alert_icon = build_ui_icon("!", tone="warning")
+        severity_rank = {"error": 3, "warning": 2, "info": 1}
+        highest_severity = "info"
+        for alert in alerts:
+            severity = str(alert.get("severity") or "").lower()
+            if severity_rank.get(severity, 0) > severity_rank.get(highest_severity, 0):
+                highest_severity = severity
+
+        severity_config = {
+            "error": {
+                "class": "alert-banner alert-banner--error",
+                "icon_code": "!!",
+                "icon_tone": "error",
+                "title": "重大なアラートが検知されました",
+            },
+            "warning": {
+                "class": "alert-banner alert-banner--warning",
+                "icon_code": "!",
+                "icon_tone": "warning",
+                "title": "警告が検知されました",
+            },
+            "info": {
+                "class": "alert-banner",
+                "icon_code": "!",
+                "icon_tone": "accent",
+                "title": "確認が必要な情報があります",
+            },
+        }
+        banner_config = severity_config.get(highest_severity, severity_config["warning"])
+        alert_icon = build_ui_icon(
+            banner_config["icon_code"], tone=banner_config["icon_tone"]
+        )
         st.markdown(
             f"""
-            <div class="alert-banner alert-banner--warning">
-                <div class="alert-banner__title">{alert_icon}<span>警告が検知されました</span></div>
-                <ul>{items}</ul>
+            <div class="{banner_config['class']}">
+                <div class="alert-banner__title">{alert_icon}<span>{banner_config['title']}</span></div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+        for index, alert in enumerate(alerts):
+            title = alert.get("message", "詳細情報")
+            with st.expander(title):
+                severity_label = str(alert.get("severity") or "").lower()
+                severity_caption = {
+                    "error": "重大",
+                    "warning": "注意",
+                    "info": "情報",
+                }.get(severity_label)
+                if severity_caption:
+                    st.markdown(f"**重大度:** {severity_caption}")
+                condition = alert.get("condition")
+                cause = alert.get("cause")
+                if condition:
+                    st.markdown(f"**発生条件:** {condition}")
+                if cause:
+                    st.markdown(f"**主な原因候補:** {cause}")
+                metric_value = alert.get("metric_value")
+                metric = alert.get("metric")
+                if metric_value is not None and metric:
+                    if metric in {"churn_rate", "gross_margin_rate"}:
+                        formatted_value = f"{metric_value * 100:.1f}%"
+                    else:
+                        formatted_value = f"{metric_value:,.0f}"
+                    st.caption(f"現在値 ({metric}) : {formatted_value}")
+                doc_path = alert.get("doc_path")
+                if doc_path:
+                    st.markdown(f"[推奨ドキュメントを開く]({doc_path})")
+                action_label = alert.get("action_label")
+                target_section = alert.get("target_section")
+                if action_label and target_section:
+                    if st.button(
+                        action_label,
+                        key=f"alert_action_{index}",
+                        use_container_width=True,
+                    ):
+                        jump_to_section(str(target_section))
     else:
         ok_icon = build_ui_icon("OK", tone="success")
         st.markdown(
@@ -6721,9 +6863,40 @@ def render_kpi_overview_tab(kpi_period_summary: pd.DataFrame) -> None:
         st.info("KPI履歴が読み込まれていません。")
         return
 
-    history = kpi_period_summary.tail(12).copy()
+    history = kpi_period_summary.copy()
     history["period_start"] = pd.to_datetime(history["period_start"])
-    history["period_label"] = history["period_label"].astype(str)
+    history.sort_values("period_start", inplace=True)
+
+    frequency_options = ["日次", "週次", "月次"]
+    default_view = st.session_state.get("kpi_overview_view", "月次")
+    if default_view not in frequency_options:
+        default_view = "月次"
+    view_label = st.radio(
+        "表示単位",
+        frequency_options,
+        index=frequency_options.index(default_view),
+        horizontal=True,
+        key="kpi_overview_view_selector",
+    )
+    st.session_state["kpi_overview_view"] = view_label
+    resample_rule = {"日次": "D", "週次": "W", "月次": "M"}[view_label]
+    resampled = (
+        history.set_index("period_start")
+        .resample(resample_rule)
+        .ffill()
+        .reset_index()
+    )
+    if resample_rule == "D":
+        resampled["period_label"] = resampled["period_start"].dt.strftime("%Y-%m-%d")
+        resampled = resampled.tail(30)
+    elif resample_rule.startswith("W"):
+        resampled["period_label"] = resampled["period_start"].dt.strftime("%Y-%m-%d週")
+        resampled = resampled.tail(16)
+    else:
+        resampled["period_label"] = resampled["period_start"].dt.strftime("%Y-%m")
+        resampled = resampled.tail(12)
+
+    current_language = get_ui_language()
 
     metric_configs = [
         ("ltv", "LTV", "円", ACCENT_COLOR, False),
@@ -6733,9 +6906,9 @@ def render_kpi_overview_tab(kpi_period_summary: pd.DataFrame) -> None:
     ]
     chart_columns = st.columns(2)
     for (metric, label, unit, color, is_percent), column in zip(metric_configs, chart_columns * 2):
-        if metric not in history.columns:
+        if metric not in resampled.columns:
             continue
-        series = history[["period_start", "period_label", metric]].dropna()
+        series = resampled[["period_start", "period_label", metric]].dropna()
         if series.empty:
             column.info(f"{label}の履歴データが不足しています。")
             continue
@@ -6762,6 +6935,15 @@ def render_kpi_overview_tab(kpi_period_summary: pd.DataFrame) -> None:
             .properties(title=f"{label}の推移", height=260)
         )
         column.altair_chart(apply_altair_theme(chart), use_container_width=True)
+        help_entry = get_kpi_help(metric, current_language)
+        if help_entry:
+            with column.expander(f"{label}の説明", expanded=False):
+                formula_text = help_entry.get("formula")
+                interpretation_text = help_entry.get("interpretation")
+                if formula_text:
+                    column.markdown(f"**計算式:** {formula_text}")
+                if interpretation_text:
+                    column.markdown(f"**見方:** {interpretation_text}")
 
     table_columns = [
         "period_label",
@@ -6772,9 +6954,9 @@ def render_kpi_overview_tab(kpi_period_summary: pd.DataFrame) -> None:
         "repeat_rate",
         "churn_rate",
     ]
-    available_columns = [col for col in table_columns if col in history.columns]
+    available_columns = [col for col in table_columns if col in resampled.columns]
     if available_columns:
-        display_df = history[available_columns].rename(columns={"period_label": "期間"}).copy()
+        display_df = resampled[available_columns].rename(columns={"period_label": "期間"}).copy()
         for currency_col in ["sales", "gross_profit", "ltv", "arpu"]:
             if currency_col in display_df.columns:
                 display_df[currency_col] = display_df[currency_col].map(
@@ -6785,7 +6967,7 @@ def render_kpi_overview_tab(kpi_period_summary: pd.DataFrame) -> None:
                 display_df[pct_col] = display_df[pct_col].map(
                     lambda v: f"{v * 100:.1f}%" if pd.notna(v) else "-"
                 )
-        st.dataframe(display_df, use_container_width=True)
+        st.data_editor(display_df, use_container_width=True, hide_index=True, disabled=True)
     else:
         st.info("KPIサマリーを表示する列が不足しています。")
 
@@ -7068,6 +7250,7 @@ def render_sales_tab(
                     }
                 )
                 column_order = [
+                    "重要度",
                     "商品コード",
                     "商品名",
                     "カテゴリ",
@@ -7076,18 +7259,23 @@ def render_sales_tab(
                     "粗利率",
                     "販売数量",
                 ]
+                display_df["重要度"] = ""
+                top_profit_idx = display_df["粗利"].nlargest(5).index
+                display_df.loc[top_profit_idx, "重要度"] = "🔶"
                 display_df = display_df[column_order]
                 column_config = {
                     "売上高": st.column_config.NumberColumn("売上高 (円)", format=",.0f"),
                     "粗利": st.column_config.NumberColumn("粗利 (円)", format=",.0f"),
                     "販売数量": st.column_config.NumberColumn("販売数量", format=",.0f"),
                     "粗利率": st.column_config.NumberColumn("粗利率 (%)", format="0.0%"),
+                    "重要度": st.column_config.Column("重要度", help="粗利トップ5の商品をハイライト表示します。"),
                 }
-                st.dataframe(
+                st.data_editor(
                     display_df,
                     hide_index=True,
                     use_container_width=True,
                     column_config=column_config,
+                    disabled=True,
                 )
                 toolbar = st.columns(4)
                 export_filename_base = "sales_detail"
@@ -8253,8 +8441,23 @@ def render_cash_tab(
         )
         plan_df = active_cash_plan.copy()
         plan_df["period_start"] = plan_df["month"].dt.to_timestamp()
-        melted = plan_df.melt(
-            id_vars=["period_start"],
+        plan_df["period_label"] = plan_df["month"].astype(str)
+        if active_cash_forecast is not None and not active_cash_forecast.empty:
+            balance_source = active_cash_forecast[["month", "cash_balance"]].copy()
+        else:
+            running = plan_df[["month", "operating_cf", "investment_cf", "financing_cf", "loan_repayment"]].copy()
+            running["net_cf"] = running[
+                ["operating_cf", "investment_cf", "financing_cf", "loan_repayment"]
+            ].sum(axis=1)
+            running.sort_values("month", inplace=True)
+            running["cash_balance"] = starting_cash + running["net_cf"].cumsum()
+            balance_source = running[["month", "cash_balance"]]
+        balance_source["period_start"] = balance_source["month"].dt.to_timestamp()
+        balance_source["period_label"] = balance_source["month"].astype(str)
+        merged_plan = plan_df.merge(balance_source, on=["month", "period_start", "period_label"], how="left")
+
+        melted = merged_plan.melt(
+            id_vars=["period_start", "period_label", "cash_balance"],
             value_vars=["operating_cf", "investment_cf", "financing_cf", "loan_repayment"],
             var_name="type",
             value_name="金額",
@@ -8269,24 +8472,45 @@ def render_cash_tab(
         melted = melted.dropna(subset=["区分"])
         domain = [label_map[key] for key in label_map]
         range_colors = [CF_COLOR_MAPPING[label] for label in domain]
-        cf_chart = alt.Chart(melted).mark_bar().encode(
+        bar_chart = alt.Chart(melted).mark_bar().encode(
             x=alt.X("period_start:T", title="期間開始", axis=alt.Axis(format="%Y-%m", labelOverlap=True)),
-            y=alt.Y("金額:Q", title="キャッシュフロー (円)", axis=alt.Axis(format=",.0f")),
+            y=alt.Y("金額:Q", title="キャッシュフロー (円)", axis=alt.Axis(format=",.0f"), stack="zero"),
             color=alt.Color("区分:N", scale=alt.Scale(domain=domain, range=range_colors), legend=alt.Legend(title="区分")),
             tooltip=[
-                alt.Tooltip("period_start:T", title="期間"),
+                alt.Tooltip("period_label:N", title="期間"),
                 alt.Tooltip("区分:N", title="区分"),
                 alt.Tooltip("金額:Q", title="金額", format=",.0f"),
             ],
         )
-        st.altair_chart(apply_altair_theme(cf_chart.properties(height=320)), use_container_width=True)
 
-        latest_plan = plan_df.iloc[-1]
+        line_source = balance_source.copy()
+        line_chart = alt.Chart(line_source).mark_line(
+            color=CASH_SERIES_COLOR, point=alt.OverlayMarkDef(size=60, filled=True)
+        ).encode(
+            x=alt.X("period_start:T"),
+            y=alt.Y(
+                "cash_balance:Q",
+                title="期末現金残高 (円)",
+                axis=alt.Axis(format=",.0f", orient="right"),
+            ),
+            tooltip=[
+                alt.Tooltip("period_label:N", title="期間"),
+                alt.Tooltip("cash_balance:Q", title="期末現金残高", format=",.0f"),
+            ],
+        )
+
+        cf_chart = alt.layer(bar_chart, line_chart).resolve_scale(y="independent").properties(
+            height=340
+        )
+        st.altair_chart(apply_altair_theme(cf_chart), use_container_width=True)
+
+        latest_plan = merged_plan.iloc[-1]
         dominant_key = max(label_map, key=lambda key: abs(float(latest_plan.get(key, 0.0))))
         dominant_label = label_map[dominant_key]
         dominant_value = float(latest_plan.get(dominant_key, 0.0))
+        latest_balance = float(latest_plan.get("cash_balance", 0.0) or 0.0)
         st.caption(
-            f"直近の主要キャッシュフローは{dominant_label}で{dominant_value:,.0f}円です。"
+            f"直近の主要キャッシュフローは{dominant_label}で{dominant_value:,.0f}円、予測期末現金残高は{latest_balance:,.0f}円です。"
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -10306,8 +10530,6 @@ def main() -> None:
 
     show_onboarding = bool(st.session_state.get("sidebar_onboarding_visible", True))
 
-    onboarding_container = st.sidebar.container()
-
     if "use_sample_data" not in st.session_state:
         set_state_and_widget("use_sample_data", True)
     else:
@@ -10337,17 +10559,26 @@ def main() -> None:
             selected_language_label, DEFAULT_LANGUAGE
         )
 
-        default_theme_mode = st.session_state.get("ui_theme_mode", "light")
-        dark_mode = st.toggle(
-            translate("theme_toggle_label", default="ダークテーマ"),
-            value=(default_theme_mode == "dark"),
-            key="ui_theme_toggle",
-            help=translate(
-                "theme_toggle_help",
-                default="ライトテーマに切り替えると背景が明るい配色になります。",
-            ),
+        theme_mode_options = [("light", "ライト"), ("dark", "ダーク"), ("custom", "カスタム")]
+        mode_lookup = {label: key for key, label in theme_mode_options}
+        current_mode = st.session_state.get("ui_theme_mode", "light")
+        default_mode_index = next(
+            (idx for idx, (key, _) in enumerate(theme_mode_options) if key == current_mode),
+            0,
         )
-        st.session_state["ui_theme_mode"] = "dark" if dark_mode else "light"
+        selected_mode_label = st.radio(
+            translate("theme_mode_label", default="テーマ"),
+            options=[label for _, label in theme_mode_options],
+            index=default_mode_index,
+            horizontal=True,
+            help=translate(
+                "theme_mode_help",
+                default="ライト・ダーク・カスタムの3種類から選択できます。",
+            ),
+            key="ui_theme_mode_radio",
+        )
+        theme_mode = mode_lookup.get(selected_mode_label, "light")
+        st.session_state["ui_theme_mode"] = theme_mode
 
         font_scale_default = int(round(st.session_state.get("ui_font_scale", 1.0) * 100))
         font_scale_default = max(85, min(120, font_scale_default))
@@ -10365,7 +10596,25 @@ def main() -> None:
         font_scale = font_scale_percent / 100.0
         st.session_state["ui_font_scale"] = font_scale
 
-        if dark_mode:
+        font_labels = [option["label"] for option in FONT_FAMILY_OPTIONS]
+        current_font_key = st.session_state.get("ui_font_choice", "mckinsey")
+        default_font_index = next(
+            (idx for idx, option in enumerate(FONT_FAMILY_OPTIONS) if option["key"] == current_font_key),
+            0,
+        )
+        selected_font_label = st.selectbox(
+            translate("font_family_label", default="フォントファミリー"),
+            options=font_labels,
+            index=default_font_index,
+            help=translate(
+                "font_family_help",
+                default="見出しと本文で使用するフォントを切り替えます。",
+            ),
+        )
+        label_to_font = {option["label"]: option["key"] for option in FONT_FAMILY_OPTIONS}
+        st.session_state["ui_font_choice"] = label_to_font.get(selected_font_label, "mckinsey")
+
+        if theme_mode == "dark":
             variant_options = list(DARK_THEME_VARIANTS.keys())
             current_variant = st.session_state.get("ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT)
             try:
@@ -10403,6 +10652,60 @@ def main() -> None:
             )
             st.session_state["ui_dark_palette_saved"] = selected_palette
             st.session_state["ui_color_palette"] = selected_palette
+        elif theme_mode == "custom":
+            st.caption(translate("theme_custom_caption", default="カスタムテーマでは背景色やアクセントカラーを自由に設定できます。"))
+            custom_theme = st.session_state.get("ui_custom_theme", CUSTOM_THEME_DEFAULT.copy()).copy()
+            background_color = st.color_picker(
+                "背景色",
+                value=custom_theme.get("background", BACKGROUND_COLOR),
+                key="custom_theme_background",
+            )
+            surface_color = st.color_picker(
+                "カード背景色",
+                value=custom_theme.get("surface", SURFACE_COLOR),
+                key="custom_theme_surface",
+            )
+            primary_color = st.color_picker(
+                "プライマリカラー",
+                value=custom_theme.get("primary", PRIMARY_COLOR),
+                key="custom_theme_primary",
+            )
+            accent_color = st.color_picker(
+                "アクセントカラー",
+                value=custom_theme.get("accent", ACCENT_COLOR),
+                key="custom_theme_accent",
+            )
+            text_color = st.color_picker(
+                "テキストカラー",
+                value=custom_theme.get("text", TEXT_COLOR),
+                key="custom_theme_text",
+            )
+            updated_theme = {
+                "background": background_color,
+                "surface": surface_color,
+                "primary": primary_color,
+                "accent": accent_color,
+                "text": text_color,
+            }
+            st.session_state["ui_custom_theme"] = updated_theme
+
+            palette_options = list(COLOR_PALETTE_PRESETS.keys())
+            current_palette = st.session_state.get("ui_color_palette", DEFAULT_CHART_PALETTE_KEY)
+            try:
+                palette_index = palette_options.index(current_palette)
+            except ValueError:
+                palette_index = 0
+            selected_palette = st.selectbox(
+                translate("palette_label", default="チャートカラーパレット"),
+                palette_options,
+                index=palette_index,
+                format_func=lambda key: str(COLOR_PALETTE_PRESETS[key]["label"]),
+                help=translate(
+                    "palette_help",
+                    default="色覚多様性に配慮した配色に切り替えられます。",
+                ),
+            )
+            st.session_state["ui_color_palette"] = selected_palette
         else:
             st.session_state["ui_dark_variant"] = st.session_state.get(
                 "ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT
@@ -10410,42 +10713,53 @@ def main() -> None:
             st.session_state["ui_color_palette"] = DEFAULT_CHART_PALETTE_KEY
 
     inject_mckinsey_style(
-        dark_mode=dark_mode,
+        dark_mode=(theme_mode == "dark"),
         theme_variant=st.session_state.get("ui_dark_variant", DEFAULT_DARK_THEME_VARIANT),
         font_scale=font_scale,
     )
 
     render_intro_section()
 
-    st.sidebar.toggle(
-        "管理者モード",
-        value=bool(st.session_state.get("admin_mode_toggle", False)),
-        key="admin_mode_toggle",
-        help="管理者向けの詳細なログ表示を有効化します。",
+    channel_files: Dict[str, List[Any]] = {}
+    ancillary_results: Dict[str, Any] = {}
+    cost_file: Optional[Any] = None
+    subscription_file: Optional[Any] = None
+
+    start_tab, settings_tab, upload_tab, admin_tab = st.sidebar.tabs(
+        ["はじめに", "データ設定", "アップロード", "管理者"]
     )
 
-    st.sidebar.image(COMPANY_LOGO_URL, width=140)
-    st.sidebar.caption("McKinsey inspired analytics suite")
-    st.sidebar.header("データ設定")
+    with start_tab:
+        start_tab.button(
+            toggle_label,
+            key="toggle_sidebar_onboarding",
+            use_container_width=True,
+            type="primary",
+            help="クリックして『はじめに』セクションの表示/非表示を切り替えます。",
+            on_click=_toggle_sidebar_onboarding,
+        )
+        start_tab.image(COMPANY_LOGO_URL, width=140)
+        start_tab.caption("McKinsey inspired analytics suite")
+        onboarding_container = start_tab.container()
+        with st.expander("ヘルプ & ドキュメント", expanded=False):
+            st.markdown("- [KPIの読み解きガイド](docs/01_user_research_and_kpi.md)")
+            st.markdown("- [ダッシュボード操作チートシート](docs/04_information_architecture_and_navigation.md)")
+            st.markdown("- [デザインと可視化のベストプラクティス](docs/07_visualization_optimization.md)")
 
     if use_sample_data:
         ensure_sample_data_cached()
 
-    wizard_panel = st.sidebar.expander("売上データ設定ウィザード", expanded=False)
-    with wizard_panel:
-        st.markdown(
+    with upload_tab:
+        upload_tab.markdown(
             "<div class='sidebar-subheading'>売上データアップロード</div>",
             unsafe_allow_html=True,
         )
-        st.caption("複数チャネルのデータをまとめて読み込む場合はこちらを利用してください。")
+        upload_tab.caption("複数チャネルのデータをまとめて読み込む場合はこちらを利用してください。")
         channel_files = render_sales_upload_wizard(
-            SALES_UPLOAD_CONFIGS, parent_container=wizard_panel
+            SALES_UPLOAD_CONFIGS, parent_container=upload_tab
         )
 
-    ancillary_results: Dict[str, Any] = {}
-    ancillary_panel = st.sidebar.expander("補助データのアップロード", expanded=False)
-    with ancillary_panel:
-        st.caption("原価率やサブスクリプションなどの補助データを必要に応じて登録できます。")
+        upload_tab.caption("原価率やサブスクリプションなどの補助データを必要に応じて登録できます。")
         for config in ANCILLARY_UPLOAD_CONFIGS:
             ancillary_results[config["key"]] = render_sidebar_upload_expander(
                 config["label"],
@@ -10464,67 +10778,81 @@ def main() -> None:
                 sample_note="期待される列構成を確認できるサンプルです。",
             )
 
-    cost_file = ancillary_results.get("cost")
-    subscription_file = ancillary_results.get("subscription")
+        cost_file = ancillary_results.get("cost")
+        subscription_file = ancillary_results.get("subscription")
 
-    remember_last_uploaded_files(channel_files, cost_file, subscription_file)
+        remember_last_uploaded_files(channel_files, cost_file, subscription_file)
 
-    last_uploaded = st.session_state.get("last_uploaded")
-    if last_uploaded:
-        preview = ", ".join(last_uploaded[:3])
-        if len(last_uploaded) > 3:
-            preview += f" 他{len(last_uploaded) - 3}件"
-        st.sidebar.caption(f"前回アップロード: {preview}")
+        last_uploaded = st.session_state.get("last_uploaded")
+        if last_uploaded:
+            preview = ", ".join(last_uploaded[:3])
+            if len(last_uploaded) > 3:
+                preview += f" 他{len(last_uploaded) - 3}件"
+            upload_tab.caption(f"前回アップロード: {preview}")
 
-    with st.sidebar.expander("設定の保存・読み込み", expanded=False):
-        st.caption("現在のフィルタや手入力KPI、シナリオをJSONとして保存・復元できます。")
-        settings_payload = json.dumps(collect_dashboard_settings(), ensure_ascii=False, indent=2)
-        st.download_button(
-            "現在の設定をダウンロード",
-            settings_payload.encode("utf-8"),
-            file_name="dashboard_settings.json",
-            mime="application/json",
+    with admin_tab:
+        admin_tab.toggle(
+            "管理者モード",
+            value=bool(st.session_state.get("admin_mode_toggle", False)),
+            key="admin_mode_toggle",
+            help="管理者向けの詳細なログ表示を有効化します。",
         )
-        uploaded_settings = st.file_uploader(
-            "保存した設定ファイルを読み込む",
-            type="json",
-            key="dashboard_settings_loader",
-        )
-        if uploaded_settings is not None:
-            try:
-                loaded_settings = json.load(uploaded_settings)
-            except json.JSONDecodeError as exc:
-                st.error(f"設定ファイルの読み込みに失敗しました: {exc}")
-            else:
-                apply_dashboard_settings(loaded_settings)
-                st.success("保存された設定を反映しました。")
-                trigger_rerun()
 
-    if "api_sales_data" not in st.session_state:
-        st.session_state["api_sales_data"] = {}
-    if "api_sales_validation" not in st.session_state:
-        st.session_state["api_sales_validation"] = {}
-    if "api_last_fetched" not in st.session_state:
-        st.session_state["api_last_fetched"] = {}
-
-    st.sidebar.markdown("---")
-    with st.sidebar.expander("API/RPA自動連携設定", expanded=False):
-        st.caption("各モールのAPIやRPAが出力したURLを登録すると、手動アップロードなしで売上データを取得できます。")
-        for channel in channel_files.keys():
-            endpoint = st.text_input(f"{channel} APIエンドポイント", key=f"api_endpoint_{channel}")
-            token = st.text_input(
-                f"{channel} APIトークン/キー",
-                key=f"api_token_{channel}",
-                type="password",
-                help="必要に応じてBasic認証やBearerトークンを設定してください。",
+        with st.expander("設定の保存・読み込み", expanded=False):
+            st.caption("現在のフィルタや手入力KPI、シナリオをJSONとして保存・復元できます。")
+            settings_payload = json.dumps(
+                collect_dashboard_settings(), ensure_ascii=False, indent=2
             )
-            params_raw = st.text_input(
-                f"{channel} クエリパラメータ (key=value&...)",
-                key=f"api_params_{channel}",
-                help="日付範囲などの条件が必要な場合に指定します。",
+            st.download_button(
+                "現在の設定をダウンロード",
+                settings_payload.encode("utf-8"),
+                file_name="dashboard_settings.json",
+                mime="application/json",
             )
+            uploaded_settings = st.file_uploader(
+                "保存した設定ファイルを読み込む",
+                type="json",
+                key="dashboard_settings_loader",
+            )
+            if uploaded_settings is not None:
+                try:
+                    loaded_settings = json.load(uploaded_settings)
+                except json.JSONDecodeError as exc:
+                    st.error(f"設定ファイルの読み込みに失敗しました: {exc}")
+                else:
+                    apply_dashboard_settings(loaded_settings)
+                    st.success("保存された設定を反映しました。")
+                    trigger_rerun()
 
-            params_dict = _parse_api_params(params_raw)
+        if "api_sales_data" not in st.session_state:
+            st.session_state["api_sales_data"] = {}
+        if "api_sales_validation" not in st.session_state:
+            st.session_state["api_sales_validation"] = {}
+        if "api_last_fetched" not in st.session_state:
+            st.session_state["api_last_fetched"] = {}
+
+        st.markdown("---")
+        with st.expander("API/RPA自動連携設定", expanded=False):
+            st.caption(
+                "各モールのAPIやRPAが出力したURLを登録すると、手動アップロードなしで売上データを取得できます。"
+            )
+            for channel in channel_files.keys():
+                endpoint = st.text_input(
+                    f"{channel} APIエンドポイント", key=f"api_endpoint_{channel}"
+                )
+                token = st.text_input(
+                    f"{channel} APIトークン/キー",
+                    key=f"api_token_{channel}",
+                    type="password",
+                    help="必要に応じてBasic認証やBearerトークンを設定してください。",
+                )
+                params_raw = st.text_input(
+                    f"{channel} クエリパラメータ (key=value&...)",
+                    key=f"api_params_{channel}",
+                    help="日付範囲などの条件が必要な場合に指定します。",
+                )
+
+                params_dict = _parse_api_params(params_raw)
 
             fetch_now = st.button(f"{channel}の最新データを取得", key=f"fetch_api_{channel}")
             if fetch_now:
@@ -10949,80 +11277,80 @@ def main() -> None:
         update_state_from_widget(state_key)
         trigger_rerun()
 
-    st.sidebar.selectbox(
-        "店舗選択",
-        options=store_options,
-        index=store_index,
-        key=store_widget_key,
-        help="最後に選択した店舗は次回アクセス時も自動で設定されます。",
-        on_change=_apply_filter_form,
-        args=(store_state_key,),
-    )
-    st.sidebar.date_input(
-        "表示期間（開始日 / 終了日）",
-        value=st.session_state[period_state_key],
-        min_value=min_date,
-        max_value=max_date,
-        key=period_widget_key,
-        help="ダッシュボードに表示する対象期間です。開始日と終了日を指定してください。",
-        on_change=_apply_filter_form,
-        args=(period_state_key,),
-    )
-    st.sidebar.multiselect(
-        "表示するチャネル",
-        options=available_channels,
-        default=st.session_state[channel_state_key] if available_channels else [],
-        key=channel_widget_key,
-        help="チャネル選択は関連レポートでも共有されます。",
-        on_change=_apply_filter_form,
-        args=(channel_state_key,),
-    )
-    st.sidebar.text_input(
-        "その他チャネルを追加",
-        key=channel_manual_input_key,
-        placeholder="チャネル名を入力",
-        help="候補一覧にないチャネル名を入力して追加できます。",
-        on_change=add_manual_filter_value,
-        args=(channel_state_key, manual_channel_state_key, channel_manual_input_key),
-    )
-    st.sidebar.multiselect(
-        "表示するカテゴリ",
-        options=available_categories,
-        default=st.session_state[category_state_key] if available_categories else [],
-        key=category_widget_key,
-        help="カテゴリ選択は粗利・在庫の分析タブにも共有されます。",
-        on_change=_apply_filter_form,
-        args=(category_state_key,),
-    )
-    st.sidebar.text_input(
-        "その他カテゴリを追加",
-        key=category_manual_input_key,
-        placeholder="カテゴリ名を入力",
-        help="候補一覧にないカテゴリ名を入力して追加できます。",
-        on_change=add_manual_filter_value,
-        args=(category_state_key, manual_category_state_key, category_manual_input_key),
-    )
-    st.sidebar.selectbox(
-        "ダッシュボード表示粒度",
-        options=freq_labels,
-        index=freq_index,
-        key=freq_widget_key,
-        help="売上やKPIの集計粒度を選べます。月次・週次・四半期などの粒度に対応しています。",
-        on_change=_apply_filter_form,
-        args=(freq_state_key,),
-    )
-    st.sidebar.caption("選択内容は変更と同時にダッシュボードへ反映されます。")
+    with settings_tab:
+        st.selectbox(
+            "店舗選択",
+            options=store_options,
+            index=store_index,
+            key=store_widget_key,
+            help="最後に選択した店舗は次回アクセス時も自動で設定されます。",
+            on_change=_apply_filter_form,
+            args=(store_state_key,),
+        )
+        st.date_input(
+            "表示期間（開始日 / 終了日）",
+            value=st.session_state[period_state_key],
+            min_value=min_date,
+            max_value=max_date,
+            key=period_widget_key,
+            help="ダッシュボードに表示する対象期間です。開始日と終了日を指定してください。",
+            on_change=_apply_filter_form,
+            args=(period_state_key,),
+        )
+        st.multiselect(
+            "表示するチャネル",
+            options=available_channels,
+            default=st.session_state[channel_state_key] if available_channels else [],
+            key=channel_widget_key,
+            help="チャネル選択は関連レポートでも共有されます。",
+            on_change=_apply_filter_form,
+            args=(channel_state_key,),
+        )
+        st.text_input(
+            "その他チャネルを追加",
+            key=channel_manual_input_key,
+            placeholder="チャネル名を入力",
+            help="候補一覧にないチャネル名を入力して追加できます。",
+            on_change=add_manual_filter_value,
+            args=(channel_state_key, manual_channel_state_key, channel_manual_input_key),
+        )
+        st.multiselect(
+            "表示するカテゴリ",
+            options=available_categories,
+            default=st.session_state[category_state_key] if available_categories else [],
+            key=category_widget_key,
+            help="カテゴリ選択は粗利・在庫の分析タブにも共有されます。",
+            on_change=_apply_filter_form,
+            args=(category_state_key,),
+        )
+        st.text_input(
+            "その他カテゴリを追加",
+            key=category_manual_input_key,
+            placeholder="カテゴリ名を入力",
+            help="候補一覧にないカテゴリ名を入力して追加できます。",
+            on_change=add_manual_filter_value,
+            args=(category_state_key, manual_category_state_key, category_manual_input_key),
+        )
+        st.selectbox(
+            "ダッシュボード表示粒度",
+            options=freq_labels,
+            index=freq_index,
+            key=freq_widget_key,
+            help="売上やKPIの集計粒度を選べます。月次・週次・四半期などの粒度に対応しています。",
+            on_change=_apply_filter_form,
+            args=(freq_state_key,),
+        )
+        st.caption("選択内容は変更と同時にダッシュボードへ反映されます。")
+        st.markdown("---")
+        if st.button("設定をリセット", key="reset_filter_button"):
+            reset_filters(default_filters)
+        if st.button("セッション状態を初期化", key="clear_session_button"):
+            st.session_state.clear()
+            trigger_rerun()
 
     current_period = st.session_state[period_state_key]
     selected_granularity_label = st.session_state[freq_state_key]
     selected_freq = freq_lookup[selected_granularity_label]
-
-    st.sidebar.markdown("---")
-    if st.sidebar.button("設定をリセット", key="reset_filter_button"):
-        reset_filters(default_filters)
-    if st.sidebar.button("セッション状態を初期化", key="clear_session_button"):
-        st.session_state.clear()
-        trigger_rerun()
 
     selected_store = st.session_state[store_state_key]
     selected_channels = st.session_state[channel_state_key]
