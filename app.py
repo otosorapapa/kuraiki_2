@@ -1205,9 +1205,54 @@ def inject_mckinsey_style(
             border-radius: var(--radius-input);
             padding: 0.75rem 1.5rem;
         }}
+        .main-nav-tabs {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.6rem;
+        }}
+        .main-nav-tabs .stButton > button {{
+            border-radius: 999px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            padding: 0.65rem 1.25rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }}
+        .main-nav-tabs .stButton > button[data-testid="baseButton-secondary"] {{
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle-color);
+            color: var(--muted-text-color);
+        }}
+        .main-nav-tabs .stButton > button[data-testid="baseButton-secondary"]:hover {{
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }}
+        .main-nav-tabs .stButton > button[data-testid="baseButton-primary"] {{
+            box-shadow: var(--shadow-md);
+        }}
         .stButton button:focus-visible, .stDownloadButton button:focus-visible {{
             outline: 3px solid var(--accent-color);
             outline-offset: 2px;
+        }}
+        .back-to-top {{
+            position: fixed;
+            bottom: 2.5rem;
+            right: 2.5rem;
+            z-index: 120;
+        }}
+        .back-to-top a {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--accent-color);
+            color: #ffffff !important;
+            padding: 0.65rem 1rem;
+            border-radius: 999px;
+            font-weight: 600;
+            text-decoration: none;
+            box-shadow: var(--shadow-md);
+        }}
+        .back-to-top a:hover {{
+            box-shadow: var(--shadow-lg);
         }}
         .hero-panel {{
             background: linear-gradient(135deg, rgba(11,31,59,0.9), rgba(30,136,229,0.75));
@@ -1843,6 +1888,13 @@ def inject_mckinsey_style(
         .wizard-file-item__size {{
             color: var(--muted-text-color);
             font-size: 0.75rem;
+        }}
+        .viewerBadge_container__1QSob,
+        .viewerBadge_link__1S137,
+        .styles_viewerBadge__1yB5S,
+        [data-testid="stHeaderActionButton"],
+        [data-testid="stAppDeployButton"] {{
+            display: none !important;
         }}
         </style>
         """,
@@ -4617,20 +4669,27 @@ def render_navigation() -> Tuple[str, str]:
     current_key = st.session_state.get("main_nav", PRIMARY_NAV_ITEMS[0]["key"])
     if current_key not in NAV_OPTION_LOOKUP:
         current_key = PRIMARY_NAV_ITEMS[0]["key"]
-    current_label = NAV_OPTION_LOOKUP[current_key]
-    current_index = label_options.index(current_label) if current_label in label_options else 0
+    selected_key = current_key
+    selected_label = NAV_OPTION_LOOKUP[selected_key]
 
-    selected_label = st.radio(
-        "主要メニュー",
-        options=label_options,
-        horizontal=True,
-        index=current_index,
-        key="main_nav_display",
-        label_visibility="collapsed",
-    )
+    st.markdown("<div class='main-nav-tabs'>", unsafe_allow_html=True)
+    nav_columns = st.columns(len(label_options))
+    for idx, label in enumerate(label_options):
+        key = label_to_key[label]
+        is_active = key == selected_key
+        button_pressed = nav_columns[idx].button(
+            label,
+            key=f"main_nav_tab_{key}",
+            use_container_width=True,
+            type="primary" if is_active else "secondary",
+        )
+        if button_pressed:
+            selected_key = key
+            selected_label = label
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    selected_key = label_to_key[selected_label]
     st.session_state["main_nav"] = selected_key
+    st.session_state["main_nav_display"] = selected_label
     return selected_key, NAV_LABEL_LOOKUP[selected_key]
 
 
@@ -7765,76 +7824,89 @@ def render_scenario_analysis_section(
         with st.form("scenario_entry_form", clear_on_submit=True):
             st.subheader("シナリオパラメータ")
             default_name = f"シナリオ {len(scenarios) + 1}"
-            scenario_name = st.text_input("シナリオ名", value=default_name)
-            growth = enhanced_number_input(
-                "売上成長率 (%)",
-                key="scenario_growth_input",
-                default_value=5.0,
-                min_value=-50.0,
-                max_value=150.0,
-                step=0.5,
-                number_format="%.1f",
-                text_format=",.1f",
-                placeholder="例: 5",
-            )
-            margin = enhanced_number_input(
-                "営業利益率 (%)",
-                key="scenario_margin_input",
-                default_value=12.0,
-                min_value=0.0,
-                max_value=100.0,
-                step=0.5,
-                number_format="%.1f",
-                text_format=",.1f",
-                placeholder="例: 12.5",
-            )
-            funding = enhanced_number_input(
-                "資金調達額 (円)",
-                key="scenario_funding_input",
-                default_value=0.0,
-                min_value=0.0,
-                step=100_000.0,
-                number_format="%.0f",
-                text_format=",.0f",
-                placeholder="例: 1,500,000",
-            )
-            horizon = st.slider("分析期間 (ヶ月)", min_value=3, max_value=36, value=12)
-            unit_price_adjust_pct = enhanced_number_input(
-                "単価調整幅 (%)",
-                key="scenario_unit_price_adjust",
-                default_value=float(form_defaults.get("unit_price_adjust_pct", 10.0)),
-                min_value=0.0,
-                max_value=100.0,
-                step=0.5,
-                number_format="%.1f",
-                text_format=",.1f",
-                placeholder="例: 10",
-                help_text="基準単価に対して感度分析で揺らす範囲を指定します。",
-            )
-            quantity_adjust_pct = enhanced_number_input(
-                "数量調整幅 (%)",
-                key="scenario_quantity_adjust",
-                default_value=float(form_defaults.get("quantity_adjust_pct", 10.0)),
-                min_value=0.0,
-                max_value=100.0,
-                step=0.5,
-                number_format="%.1f",
-                text_format=",.1f",
-                placeholder="例: 8",
-                help_text="基準数量に対して感度分析で揺らす範囲を指定します。",
-            )
-            fixed_cost_adjust_pct = enhanced_number_input(
-                "固定費調整幅 (%)",
-                key="scenario_fixed_cost_adjust",
-                default_value=float(form_defaults.get("fixed_cost_adjust_pct", 10.0)),
-                min_value=0.0,
-                max_value=100.0,
-                step=0.5,
-                number_format="%.1f",
-                text_format=",.1f",
-                placeholder="例: 12",
-                help_text="基準固定費に対する増減幅です。",
-            )
+            name_col, horizon_col = st.columns([2, 1])
+            scenario_name = name_col.text_input("シナリオ名", value=default_name)
+            horizon = horizon_col.slider("分析期間 (ヶ月)", min_value=3, max_value=36, value=12)
+
+            st.markdown("#### 主要指標")
+            metric_cols = st.columns(3)
+            with metric_cols[0]:
+                growth = enhanced_number_input(
+                    "売上成長率 (%)",
+                    key="scenario_growth_input",
+                    default_value=5.0,
+                    min_value=-50.0,
+                    max_value=150.0,
+                    step=0.5,
+                    number_format="%.1f",
+                    text_format=",.1f",
+                    placeholder="例: 5",
+                )
+            with metric_cols[1]:
+                margin = enhanced_number_input(
+                    "営業利益率 (%)",
+                    key="scenario_margin_input",
+                    default_value=12.0,
+                    min_value=0.0,
+                    max_value=100.0,
+                    step=0.5,
+                    number_format="%.1f",
+                    text_format=",.1f",
+                    placeholder="例: 12.5",
+                )
+            with metric_cols[2]:
+                funding = enhanced_number_input(
+                    "資金調達額 (円)",
+                    key="scenario_funding_input",
+                    default_value=0.0,
+                    min_value=0.0,
+                    step=100_000.0,
+                    number_format="%.0f",
+                    text_format=",.0f",
+                    placeholder="例: 1,500,000",
+                )
+
+            with st.expander("詳細な感度設定", expanded=False):
+                adjust_cols = st.columns(3)
+                with adjust_cols[0]:
+                    unit_price_adjust_pct = enhanced_number_input(
+                        "単価調整幅 (%)",
+                        key="scenario_unit_price_adjust",
+                        default_value=float(form_defaults.get("unit_price_adjust_pct", 10.0)),
+                        min_value=0.0,
+                        max_value=100.0,
+                        step=0.5,
+                        number_format="%.1f",
+                        text_format=",.1f",
+                        placeholder="例: 10",
+                        help_text="基準単価に対して感度分析で揺らす範囲を指定します。",
+                    )
+                with adjust_cols[1]:
+                    quantity_adjust_pct = enhanced_number_input(
+                        "数量調整幅 (%)",
+                        key="scenario_quantity_adjust",
+                        default_value=float(form_defaults.get("quantity_adjust_pct", 10.0)),
+                        min_value=0.0,
+                        max_value=100.0,
+                        step=0.5,
+                        number_format="%.1f",
+                        text_format=",.1f",
+                        placeholder="例: 8",
+                        help_text="基準数量に対して感度分析で揺らす範囲を指定します。",
+                    )
+                with adjust_cols[2]:
+                    fixed_cost_adjust_pct = enhanced_number_input(
+                        "固定費調整幅 (%)",
+                        key="scenario_fixed_cost_adjust",
+                        default_value=float(form_defaults.get("fixed_cost_adjust_pct", 10.0)),
+                        min_value=0.0,
+                        max_value=100.0,
+                        step=0.5,
+                        number_format="%.1f",
+                        text_format=",.1f",
+                        placeholder="例: 12",
+                        help_text="基準固定費に対する増減幅です。",
+                    )
             submitted = st.form_submit_button("シナリオを追加")
             if submitted:
                 form_defaults.update(
@@ -8275,7 +8347,8 @@ def format_file_size(num_bytes: Optional[int]) -> str:
 
 
 def render_sales_upload_wizard(
-    configs: Sequence[Dict[str, str]]
+    configs: Sequence[Dict[str, str]],
+    parent_container: Optional[Any] = None,
 ) -> Dict[str, List[Any]]:
     """売上データ取り込みウィザードを描画し、チャネルごとのファイルを返す。"""
 
@@ -8285,7 +8358,11 @@ def render_sales_upload_wizard(
     preview_rows: List[Dict[str, str]] = []
     unassigned_count = 0
 
-    with st.sidebar.container():
+    container = (
+        parent_container.container() if parent_container is not None else st.sidebar.container()
+    )
+
+    with container:
         st.markdown("<div class='sidebar-wizard-title'>売上データ取り込みウィザード</div>", unsafe_allow_html=True)
         st.caption("複数チャネルの売上ファイルをまとめてアップロードし、チャネルへ一括割当できます。")
 
@@ -8394,6 +8471,8 @@ def main() -> None:
     init_phase2_session_state()
     ensure_theme_state_defaults()
 
+    st.markdown("<div id='page-top'></div>", unsafe_allow_html=True)
+
     st.session_state.setdefault("hotkey_last_processed", None)
 
     if st.session_state.pop("pending_enable_sample_data", False):
@@ -8428,65 +8507,69 @@ def main() -> None:
         ensure_widget_mirror("use_sample_data")
     use_sample_data = bool(st.session_state.get("use_sample_data", True))
 
-    default_theme_mode = st.session_state.get("ui_theme_mode", "dark")
-    dark_mode = st.sidebar.toggle(
-        "ダークテーマ",
-        value=(default_theme_mode == "dark"),
-        key="ui_theme_toggle",
-        help="ライトテーマに切り替えると背景が明るい配色になります。",
-    )
-    st.session_state["ui_theme_mode"] = "dark" if dark_mode else "light"
+    theme_expander = st.sidebar.expander("テーマと表示設定", expanded=False)
+    with theme_expander:
+        st.caption("配色やフォントサイズを調整して見やすいダッシュボードにカスタマイズできます。")
 
-    font_scale_default = int(round(st.session_state.get("ui_font_scale", 1.0) * 100))
-    font_scale_default = max(85, min(120, font_scale_default))
-    font_scale_percent = st.sidebar.slider(
-        "本文フォントサイズ",
-        min_value=85,
-        max_value=120,
-        value=font_scale_default,
-        step=5,
-        help="本文や表の文字サイズを調整します (基準値=100)。",
-    )
-    font_scale = font_scale_percent / 100.0
-    st.session_state["ui_font_scale"] = font_scale
+        default_theme_mode = st.session_state.get("ui_theme_mode", "dark")
+        dark_mode = st.toggle(
+            "ダークテーマ",
+            value=(default_theme_mode == "dark"),
+            key="ui_theme_toggle",
+            help="ライトテーマに切り替えると背景が明るい配色になります。",
+        )
+        st.session_state["ui_theme_mode"] = "dark" if dark_mode else "light"
 
-    if dark_mode:
-        variant_options = list(DARK_THEME_VARIANTS.keys())
-        current_variant = st.session_state.get("ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT)
-        try:
-            variant_index = variant_options.index(current_variant)
-        except ValueError:
-            variant_index = 0
-        selected_variant = st.sidebar.selectbox(
-            "暗色テーマのコントラスト",
-            variant_options,
-            index=variant_index,
-            format_func=lambda key: DARK_THEME_VARIANT_LABELS.get(key, key),
-            help="暗色テーマ時の背景/境界のコントラストを調整します。",
+        font_scale_default = int(round(st.session_state.get("ui_font_scale", 1.0) * 100))
+        font_scale_default = max(85, min(120, font_scale_default))
+        font_scale_percent = st.slider(
+            "本文フォントサイズ",
+            min_value=85,
+            max_value=120,
+            value=font_scale_default,
+            step=5,
+            help="本文や表の文字サイズを調整します (基準値=100)。",
         )
-        st.session_state["ui_dark_variant_saved"] = selected_variant
-        st.session_state["ui_dark_variant"] = selected_variant
+        font_scale = font_scale_percent / 100.0
+        st.session_state["ui_font_scale"] = font_scale
 
-        palette_options = list(COLOR_PALETTE_PRESETS.keys())
-        current_palette = st.session_state.get("ui_dark_palette_saved", DEFAULT_CHART_PALETTE_KEY)
-        try:
-            palette_index = palette_options.index(current_palette)
-        except ValueError:
-            palette_index = 0
-        selected_palette = st.sidebar.selectbox(
-            "チャートカラーパレット",
-            palette_options,
-            index=palette_index,
-            format_func=lambda key: str(COLOR_PALETTE_PRESETS[key]["label"]),
-            help="色覚多様性に配慮した配色に切り替えられます。",
-        )
-        st.session_state["ui_dark_palette_saved"] = selected_palette
-        st.session_state["ui_color_palette"] = selected_palette
-    else:
-        st.session_state["ui_dark_variant"] = st.session_state.get(
-            "ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT
-        )
-        st.session_state["ui_color_palette"] = DEFAULT_CHART_PALETTE_KEY
+        if dark_mode:
+            variant_options = list(DARK_THEME_VARIANTS.keys())
+            current_variant = st.session_state.get("ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT)
+            try:
+                variant_index = variant_options.index(current_variant)
+            except ValueError:
+                variant_index = 0
+            selected_variant = st.selectbox(
+                "暗色テーマのコントラスト",
+                variant_options,
+                index=variant_index,
+                format_func=lambda key: DARK_THEME_VARIANT_LABELS.get(key, key),
+                help="暗色テーマ時の背景/境界のコントラストを調整します。",
+            )
+            st.session_state["ui_dark_variant_saved"] = selected_variant
+            st.session_state["ui_dark_variant"] = selected_variant
+
+            palette_options = list(COLOR_PALETTE_PRESETS.keys())
+            current_palette = st.session_state.get("ui_dark_palette_saved", DEFAULT_CHART_PALETTE_KEY)
+            try:
+                palette_index = palette_options.index(current_palette)
+            except ValueError:
+                palette_index = 0
+            selected_palette = st.selectbox(
+                "チャートカラーパレット",
+                palette_options,
+                index=palette_index,
+                format_func=lambda key: str(COLOR_PALETTE_PRESETS[key]["label"]),
+                help="色覚多様性に配慮した配色に切り替えられます。",
+            )
+            st.session_state["ui_dark_palette_saved"] = selected_palette
+            st.session_state["ui_color_palette"] = selected_palette
+        else:
+            st.session_state["ui_dark_variant"] = st.session_state.get(
+                "ui_dark_variant_saved", DEFAULT_DARK_THEME_VARIANT
+            )
+            st.session_state["ui_color_palette"] = DEFAULT_CHART_PALETTE_KEY
 
     inject_mckinsey_style(
         dark_mode=dark_mode,
@@ -8510,34 +8593,38 @@ def main() -> None:
     if use_sample_data:
         ensure_sample_data_cached()
 
-    st.sidebar.markdown(
-        "<div class='sidebar-subheading'>売上データアップロード</div>",
-        unsafe_allow_html=True,
-    )
-    channel_files = render_sales_upload_wizard(SALES_UPLOAD_CONFIGS)
-
-    st.sidebar.markdown(
-        "<div class='sidebar-subheading'>補助データ</div>",
-        unsafe_allow_html=True,
-    )
-    ancillary_results: Dict[str, Any] = {}
-    for config in ANCILLARY_UPLOAD_CONFIGS:
-        ancillary_results[config["key"]] = render_sidebar_upload_expander(
-            config["label"],
-            uploader_key=config["key"],
-            description=config["description"],
-            multiple=config.get("multiple", False),
-            meta_text=config.get("meta_text", UPLOAD_META_SINGLE),
-            help_text=config.get("help_text", UPLOAD_HELP_SINGLE),
-            sample_label=f"{config['label']}サンプルCSVをダウンロード",
-            sample_generator=(
-                get_sample_cost_template
-                if config["key"] == "cost"
-                else get_sample_subscription_template
-            ),
-            sample_filename=_build_sample_filename("ancillary", config["key"]),
-            sample_note="期待される列構成を確認できるサンプルです。",
+    wizard_panel = st.sidebar.expander("売上データ設定ウィザード", expanded=False)
+    with wizard_panel:
+        st.markdown(
+            "<div class='sidebar-subheading'>売上データアップロード</div>",
+            unsafe_allow_html=True,
         )
+        st.caption("複数チャネルのデータをまとめて読み込む場合はこちらを利用してください。")
+        channel_files = render_sales_upload_wizard(
+            SALES_UPLOAD_CONFIGS, parent_container=wizard_panel
+        )
+
+    ancillary_results: Dict[str, Any] = {}
+    ancillary_panel = st.sidebar.expander("補助データのアップロード", expanded=False)
+    with ancillary_panel:
+        st.caption("原価率やサブスクリプションなどの補助データを必要に応じて登録できます。")
+        for config in ANCILLARY_UPLOAD_CONFIGS:
+            ancillary_results[config["key"]] = render_sidebar_upload_expander(
+                config["label"],
+                uploader_key=config["key"],
+                description=config["description"],
+                multiple=config.get("multiple", False),
+                meta_text=config.get("meta_text", UPLOAD_META_SINGLE),
+                help_text=config.get("help_text", UPLOAD_HELP_SINGLE),
+                sample_label=f"{config['label']}サンプルCSVをダウンロード",
+                sample_generator=(
+                    get_sample_cost_template
+                    if config["key"] == "cost"
+                    else get_sample_subscription_template
+                ),
+                sample_filename=_build_sample_filename("ancillary", config["key"]),
+                sample_note="期待される列構成を確認できるサンプルです。",
+            )
 
     cost_file = ancillary_results.get("cost")
     subscription_file = ancillary_results.get("subscription")
@@ -10387,6 +10474,11 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("アプリの使い方や改善要望があれば開発チームまでご連絡ください。")
+
+    st.markdown(
+        "<div class='back-to-top'><a href='#page-top'>⬆ トップへ戻る</a></div>",
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
