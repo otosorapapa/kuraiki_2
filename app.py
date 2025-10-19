@@ -2557,6 +2557,27 @@ def load_saved_upload(entry: Dict[str, Any]) -> Optional[pd.DataFrame]:
     return None
 
 
+def _make_json_serializable(value: Any) -> Any:
+    """Streamlitのセッション状態から取り出した値をJSONシリアライズ可能な型に変換する。"""
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _make_json_serializable(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_make_json_serializable(item) for item in value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):  # numpy配列などをPythonのリストに変換
+        return _make_json_serializable(tolist())
+    return str(value)
+
+
 def collect_dashboard_settings() -> Dict[str, Any]:
     """現在のフィルタやシナリオ設定をJSON化して返す。"""
 
@@ -2571,13 +2592,14 @@ def collect_dashboard_settings() -> Dict[str, Any]:
     scenarios = st.session_state.get("scenario_inputs", [])
     scenario_defaults = st.session_state.get("scenario_form_defaults", {})
     saved_sales = st.session_state.get("active_saved_sales", [])
-    return {
+    settings = {
         "filters": filters,
         "manual_inputs": manual_inputs,
         "scenarios": scenarios,
         "scenario_defaults": scenario_defaults,
         "saved_sales_paths": saved_sales,
     }
+    return {key: _make_json_serializable(value) for key, value in settings.items()}
 
 
 def apply_dashboard_settings(settings: Dict[str, Any]) -> None:
