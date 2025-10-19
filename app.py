@@ -85,6 +85,13 @@ st.set_page_config(
     page_icon=":bar_chart:",
     layout="wide",
     initial_sidebar_state="expanded",
+    theme={
+        "primaryColor": "#2563EB",
+        "backgroundColor": "#F8FAFC",
+        "secondaryBackgroundColor": "#FFFFFF",
+        "textColor": "#0F172A",
+        "font": "Inter",
+    },
 )
 
 
@@ -702,6 +709,108 @@ COLOR_PALETTE_PRESETS: Dict[str, Dict[str, Union[str, List[str]]]] = {
 }
 DEFAULT_CHART_PALETTE_KEY = "brand"
 
+LANGUAGE_OPTIONS: List[Tuple[str, str]] = [
+    ("ja", "日本語"),
+    ("en", "English"),
+]
+DEFAULT_LANGUAGE = "ja"
+
+I18N_STRINGS: Dict[str, Dict[str, str]] = {
+    "theme_language_label": {"ja": "表示言語", "en": "Display language"},
+    "theme_language_help": {
+        "ja": "日本語/英語の表記とヘルプを切り替えます。",
+        "en": "Switch between Japanese and English labels and help text.",
+    },
+    "theme_toggle_label": {"ja": "ダークテーマ", "en": "Dark theme"},
+    "theme_toggle_help": {
+        "ja": "ライトテーマに切り替えると背景が明るい配色になります。",
+        "en": "Toggle to switch between light and dark color schemes.",
+    },
+    "theme_caption": {
+        "ja": "配色やフォントサイズを調整して見やすいダッシュボードにカスタマイズできます。",
+        "en": "Tweak colors and typography for better readability.",
+    },
+    "font_size_label": {"ja": "本文フォントサイズ", "en": "Body font size"},
+    "font_size_help": {
+        "ja": "本文や表の文字サイズを調整します (基準値=100)。",
+        "en": "Adjust type scale for body text and tables (base = 100).",
+    },
+    "dark_variant_label": {
+        "ja": "暗色テーマのコントラスト",
+        "en": "Dark theme contrast",
+    },
+    "dark_variant_help": {
+        "ja": "暗色テーマ時の背景/境界のコントラストを調整します。",
+        "en": "Fine-tune contrast tokens when dark mode is enabled.",
+    },
+    "palette_label": {
+        "ja": "チャートカラーパレット",
+        "en": "Chart color palette",
+    },
+    "palette_help": {
+        "ja": "色覚多様性に配慮した配色に切り替えられます。",
+        "en": "Choose palettes with improved color-vision accessibility.",
+    },
+    "quick_search_title": {"ja": "クイック検索", "en": "Quick search"},
+    "quick_search_placeholder": {
+        "ja": "商品名、チャネル、チュートリアルを検索",
+        "en": "Search products, channels, or tutorials",
+    },
+    "quick_search_heading": {
+        "ja": "クイック検索結果",
+        "en": "Quick search results",
+    },
+    "quick_search_no_data": {
+        "ja": "売上データが読み込まれていないため検索できません。",
+        "en": "Sales data has not been loaded yet.",
+    },
+    "quick_search_no_match": {
+        "ja": "売上データに一致する項目は見つかりませんでした。",
+        "en": "No matching rows were found in sales data.",
+    },
+    "quick_search_tab_sales": {
+        "ja": "売上データ",
+        "en": "Sales data",
+    },
+    "quick_search_tab_tutorials": {
+        "ja": "チュートリアル",
+        "en": "Tutorials",
+    },
+    "quick_search_tab_help": {
+        "ja": "検索結果の種類を切り替えます。",
+        "en": "Switch between sales matches and documentation.",
+    },
+    "quick_search_tutorial_heading": {
+        "ja": "関連チュートリアル",
+        "en": "Related tutorials",
+    },
+    "quick_search_caption": {
+        "ja": "直近の一致10件を表示しています。",
+        "en": "Showing the 10 most recent matches.",
+    },
+    "quick_search_no_tutorial": {
+        "ja": "該当するチュートリアルは見つかりませんでした。",
+        "en": "No tutorials matched the query.",
+    },
+    "back_to_top_label": {"ja": "トップへ戻る", "en": "Back to top"},
+    "back_to_top_aria": {
+        "ja": "ページの先頭へ戻る",
+        "en": "Return to the top of the page",
+    },
+    "streamlit_badge_aria": {
+        "ja": "Streamlit公式サイト (外部リンク)",
+        "en": "Streamlit official site (opens in new tab)",
+    },
+    "kpi_help_language_label": {"ja": "KPIヘルプ言語", "en": "KPI help language"},
+    "kpi_help_button_label": {"ja": "KPIヘルプ", "en": "KPI help"},
+    "kpi_help_button_help": {
+        "ja": "指標の定義一覧を表示します。",
+        "en": "Open the glossary of KPI definitions.",
+    },
+    "kpi_help_panel_title": {"ja": "KPI定義ヘルプ", "en": "KPI definitions"},
+    "kpi_help_close": {"ja": "ヘルプを閉じる", "en": "Close help"},
+}
+
 PHASE2_SESSION_DEFAULTS: Dict[str, Any] = {
     "scenario_inputs": [],
     "scenario_uploaded_df": None,
@@ -710,7 +819,8 @@ PHASE2_SESSION_DEFAULTS: Dict[str, Any] = {
     "phase2_swot": None,
     "phase2_benchmark": None,
     "phase2_report_summary": "",
-    "ui_theme_mode": "dark",
+    "ui_theme_mode": "light",
+    "ui_language": DEFAULT_LANGUAGE,
 }
 
 
@@ -725,6 +835,31 @@ def init_phase2_session_state() -> None:
                 st.session_state[key] = dict(default)
             else:
                 st.session_state[key] = default
+
+
+def ensure_language_state_defaults() -> None:
+    """UI言語設定のデフォルト値をセッションに登録する。"""
+
+    st.session_state.setdefault("ui_language", DEFAULT_LANGUAGE)
+
+
+def get_ui_language() -> str:
+    """現在選択されているUI言語コードを返す。"""
+
+    return str(st.session_state.get("ui_language", DEFAULT_LANGUAGE))
+
+
+def translate(key: str, *, default: Optional[str] = None, language: Optional[str] = None) -> str:
+    """I18N辞書から翻訳文字列を取得する。"""
+
+    lang = language or get_ui_language()
+    if key in I18N_STRINGS:
+        entry = I18N_STRINGS[key]
+        if lang in entry:
+            return entry[lang]
+        if DEFAULT_LANGUAGE in entry:
+            return entry[DEFAULT_LANGUAGE]
+    return default if default is not None else key
 
 TYPOGRAPHY_TOKENS: Dict[str, Dict[str, Union[str, int, float]]] = {
     "h1": {"size": "1.75rem", "weight": 700, "line_height": 1.35},
@@ -1362,6 +1497,21 @@ def inject_mckinsey_style(
         .back-to-top a:hover {{
             box-shadow: var(--shadow-lg);
         }}
+        footer [data-testid="stFooter"] a[href*="streamlit.io"] {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: var(--surface-color);
+            border: 1px solid var(--border-subtle-color);
+            border-radius: var(--radius-chip);
+            padding: 0.35rem 0.75rem;
+            color: var(--text-color);
+        }}
+        footer [data-testid="stFooter"] a[href*="streamlit.io"]::after {{
+            content: attr(data-external-label);
+            font-size: 0.75rem;
+            color: var(--muted-text-color);
+        }}
         .hero-panel {{
             background: linear-gradient(135deg, rgba(11,31,59,0.9), rgba(30,136,229,0.75));
             border-radius: var(--radius-panel);
@@ -1540,6 +1690,14 @@ def inject_mckinsey_style(
             flex-wrap: wrap;
             gap: var(--spacing-xs);
             margin-bottom: var(--spacing-md);
+            background: var(--surface-color);
+            border-radius: var(--radius-card);
+            border: 1px solid var(--border-subtle-color);
+            padding: 0.75rem 1rem;
+            position: sticky;
+            top: 4.75rem;
+            z-index: 60;
+            box-shadow: var(--shadow-sm);
         }}
         .dashboard-meta__chip {{
             padding: 0.4rem 0.85rem;
@@ -1616,14 +1774,48 @@ def inject_mckinsey_style(
             font-family: var(--numeric-font-family);
             font-variant-numeric: tabular-nums;
             font-feature-settings: 'tnum';
-            color: var(--primary-color);
-            font-size: 1.45rem;
+            color: var(--text-color);
+            font-size: calc(1.4rem * var(--font-scale));
         }}
         div[data-testid="stMetricDelta"] {{
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: calc(0.9rem * var(--font-scale));
             display: flex;
             align-items: center;
+        }}
+        div[data-testid="stTabs"] > div[role="tablist"] {{
+            position: sticky;
+            top: 6.6rem;
+            z-index: 50;
+            background: var(--background-color);
+            padding: 0.4rem 0.25rem;
+            margin-bottom: var(--spacing-md);
+            gap: var(--spacing-xs);
+            border-bottom: 1px solid var(--border-subtle-color);
+        }}
+        div[data-testid="stTabs"] button[role="tab"] {{
+            border-radius: 999px;
+            padding: 0.55rem 1.15rem;
+            font-weight: 600;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-color);
+            transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+        }}
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+            background: var(--accent-color);
+            color: #ffffff;
+            border-color: var(--accent-color);
+            box-shadow: var(--shadow-md);
+        }}
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="false"] {{
+            background: var(--surface-tint-color);
+            border-color: var(--border-subtle-color);
+            color: var(--muted-text-color);
+        }}
+        div[data-testid="stTabs"] button[role="tab"]:focus-visible {{
+            outline: 3px solid var(--accent-color);
+            outline-offset: 2px;
         }}
         div[data-testid="stMetricDelta"] svg {{
             fill: currentColor !important;
@@ -2009,6 +2201,49 @@ def inject_mckinsey_style(
         unsafe_allow_html=True,
     )
 
+
+def apply_accessibility_enhancements() -> None:
+    """主要コンポーネントにARIA属性を付与し支援技術対応を強化する。"""
+
+    aria_back_to_top = json.dumps(
+        translate("back_to_top_aria", default="ページの先頭へ戻る")
+    )
+    aria_badge = json.dumps(
+        translate("streamlit_badge_aria", default="Streamlit公式サイト (外部リンク)")
+    )
+
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            const doc = window.parent.document;
+            const backToTop = doc.querySelector('.back-to-top a');
+            const backToTopLabel = {aria_back_to_top};
+            if (backToTop) {{
+                backToTop.setAttribute('aria-label', backToTopLabel);
+                backToTop.setAttribute('title', backToTopLabel);
+            }}
+            const badge = doc.querySelector('footer [data-testid="stFooter"] a[href*="streamlit.io"]');
+            const badgeLabel = {aria_badge};
+            if (badge) {{
+                badge.setAttribute('aria-label', badgeLabel);
+                badge.setAttribute('title', badgeLabel);
+                badge.setAttribute('rel', 'noopener noreferrer');
+                badge.setAttribute('data-external-label', badgeLabel);
+            }}
+            doc.querySelectorAll('button[data-testid^="baseButton"]').forEach((button) => {{
+                if (!button.getAttribute('aria-label')) {{
+                    const text = button.textContent.trim();
+                    if (text) {{
+                        button.setAttribute('aria-label', text);
+                    }}
+                }}
+            }});
+        }})();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def remember_last_uploaded_files(
@@ -5119,12 +5354,19 @@ def render_search_bar() -> str:
             "<div class='surface-card search-card'>", unsafe_allow_html=True
         )
         st.markdown(
-            "<div class='search-title'>クイック検索</div>",
+            "<div class='search-title'>{title}</div>".format(
+                title=html.escape(
+                    translate("quick_search_title", default="クイック検索")
+                )
+            ),
             unsafe_allow_html=True,
         )
         query = st.text_input(
-            "クイック検索",
-            placeholder="商品名、チャネル、チュートリアルを検索",
+            translate("quick_search_title", default="クイック検索"),
+            placeholder=translate(
+                "quick_search_placeholder",
+                default="商品名、チャネル、チュートリアルを検索",
+            ),
             key="global_search",
             label_visibility="collapsed",
         )
@@ -5142,8 +5384,34 @@ def render_global_search_results(query: str, merged_df: pd.DataFrame) -> None:
     query_lower = query.lower()
     with st.container():
         st.markdown("<div class='surface-card search-results-card'>", unsafe_allow_html=True)
-        st.markdown("### クイック検索結果")
+        st.markdown(
+            "### {heading}".format(
+                heading=html.escape(
+                    translate("quick_search_heading", default="クイック検索結果")
+                )
+            )
+        )
 
+        tab_entries: List[Tuple[str, str]] = [
+            ("sales", translate("quick_search_tab_sales", default="売上データ")),
+            ("tutorials", translate("quick_search_tab_tutorials", default="チュートリアル")),
+        ]
+        tab_lookup = {key: label for key, label in tab_entries}
+        selected_tab = persistent_segmented_control(
+            "quick_search_active_tab",
+            [key for key, _ in tab_entries],
+            default="sales",
+            label="Quick search tab",
+            help_text=translate(
+                "quick_search_tab_help",
+                default="検索結果の種類を切り替えます。",
+            ),
+            label_visibility="collapsed",
+            format_func=lambda key: tab_lookup.get(str(key), str(key)),
+        )
+
+        sales_summary: Optional[pd.DataFrame] = None
+        sales_message: Optional[str] = None
         if merged_df is not None and not merged_df.empty:
             searchable = merged_df.copy()
             for column in ["product_name", "channel", "category"]:
@@ -5173,7 +5441,9 @@ def render_global_search_results(query: str, merged_df: pd.DataFrame) -> None:
                 display_cols = []
                 if "order_date" in matched_sales.columns:
                     matched_sales["order_date"] = pd.to_datetime(matched_sales["order_date"])
-                    matched_sales["order_date_str"] = matched_sales["order_date"].dt.strftime("%Y-%m-%d")
+                    matched_sales["order_date_str"] = matched_sales["order_date"].dt.strftime(
+                        "%Y-%m-%d"
+                    )
                     display_cols.append("order_date_str")
                 if "channel" in matched_sales.columns:
                     display_cols.append("channel")
@@ -5190,12 +5460,20 @@ def render_global_search_results(query: str, merged_df: pd.DataFrame) -> None:
                     }
                 )
                 if "売上高" in summary_table.columns:
-                    summary_table["売上高"] = summary_table["売上高"].map(lambda v: f"{v:,.0f}")
-                st.dataframe(summary_table, hide_index=True, use_container_width=True)
+                    summary_table["売上高"] = summary_table["売上高"].map(
+                        lambda v: f"{v:,.0f}"
+                    )
+                sales_summary = summary_table
             else:
-                st.caption("売上データに一致する項目は見つかりませんでした。")
+                sales_message = translate(
+                    "quick_search_no_match",
+                    default="売上データに一致する項目は見つかりませんでした。",
+                )
         else:
-            st.caption("売上データが読み込まれていないため検索できません。")
+            sales_message = translate(
+                "quick_search_no_data",
+                default="売上データが読み込まれていないため検索できません。",
+            )
 
         matches = [
             tutorial
@@ -5203,10 +5481,37 @@ def render_global_search_results(query: str, merged_df: pd.DataFrame) -> None:
             if query_lower in tutorial["title"].lower()
             or any(query_lower in keyword.lower() for keyword in tutorial.get("keywords", []))
         ]
-        if matches:
-            st.markdown("**関連チュートリアル**")
-            for tutorial in matches:
-                st.markdown(f"- [{tutorial['title']}]({tutorial['path']})")
+        if selected_tab == "sales":
+            if sales_summary is not None and not sales_summary.empty:
+                st.caption(
+                    translate(
+                        "quick_search_caption", default="直近の一致10件を表示しています。"
+                    )
+                )
+                st.dataframe(sales_summary, hide_index=True, use_container_width=True)
+            elif sales_message:
+                st.caption(sales_message)
+        else:
+            st.markdown(
+                "**{heading}**".format(
+                    heading=html.escape(
+                        translate(
+                            "quick_search_tutorial_heading",
+                            default="関連チュートリアル",
+                        )
+                    )
+                )
+            )
+            if matches:
+                for tutorial in matches:
+                    st.markdown(f"- [{tutorial['title']}]({tutorial['path']})")
+            else:
+                st.caption(
+                    translate(
+                        "quick_search_no_tutorial",
+                        default="該当するチュートリアルは見つかりませんでした。",
+                    )
+                )
         st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -5322,10 +5627,7 @@ def show_kpi_card(
     )
 
 
-KPI_LANGUAGE_OPTIONS = [
-    ("ja", "日本語"),
-    ("en", "English"),
-]
+KPI_LANGUAGE_OPTIONS = LANGUAGE_OPTIONS
 
 
 def get_kpi_help(metric_key: str, language: str) -> Optional[Dict[str, str]]:
@@ -5366,7 +5668,7 @@ def render_kpi_help_panel(language: str) -> None:
 def render_kpi_help_controls() -> str:
     """KPIヘルプ用の言語切替UIを描画し、選択言語コードを返す。"""
 
-    default_lang = st.session_state.get("kpi_help_language", "ja")
+    default_lang = st.session_state.get("kpi_help_language", get_ui_language())
     lang_index = next(
         (idx for idx, (code, _) in enumerate(KPI_LANGUAGE_OPTIONS) if code == default_lang),
         0,
@@ -5375,26 +5677,37 @@ def render_kpi_help_controls() -> str:
     controls = st.columns([3, 1])
     with controls[0]:
         selected_label = st.selectbox(
-            "KPIヘルプ言語",
+            translate("kpi_help_language_label", default="KPIヘルプ言語"),
             options=[label for _, label in KPI_LANGUAGE_OPTIONS],
             index=lang_index,
-            help="ツールチップおよびヘルプパネルで利用する言語を選択します。",
+            help=translate(
+                "theme_language_help",
+                default="日本語/英語の表記とヘルプを切り替えます。",
+            ),
         )
     label_to_code = {label: code for code, label in KPI_LANGUAGE_OPTIONS}
     language_code = label_to_code.get(selected_label, "ja")
     st.session_state["kpi_help_language"] = language_code
 
     with controls[1]:
-        if st.button("KPIヘルプ", type="secondary", help="指標の定義一覧を表示します。"):
+        if st.button(
+            translate("kpi_help_button_label", default="KPIヘルプ"),
+            type="secondary",
+            help=translate(
+                "kpi_help_button_help", default="指標の定義一覧を表示します。"
+            ),
+        ):
             st.session_state["kpi_help_visible"] = not st.session_state.get(
                 "kpi_help_visible", False
             )
 
     if st.session_state.get("kpi_help_visible"):
-        with st.expander("KPI定義ヘルプ", expanded=True):
+        with st.expander(
+            translate("kpi_help_panel_title", default="KPI定義ヘルプ"), expanded=True
+        ):
             render_kpi_help_panel(language_code)
             st.button(
-                "ヘルプを閉じる",
+                translate("kpi_help_close", default="ヘルプを閉じる"),
                 key="close_kpi_help_panel",
                 on_click=lambda: st.session_state.update({"kpi_help_visible": False}),
             )
@@ -9242,6 +9555,7 @@ def render_sales_upload_wizard(
 def main() -> None:
     init_phase2_session_state()
     ensure_theme_state_defaults()
+    ensure_language_state_defaults()
     load_share_payload_from_query()
 
     st.markdown("<div id='page-top'></div>", unsafe_allow_html=True)
@@ -9282,26 +9596,51 @@ def main() -> None:
 
     theme_expander = st.sidebar.expander("テーマと表示設定", expanded=False)
     with theme_expander:
-        st.caption("配色やフォントサイズを調整して見やすいダッシュボードにカスタマイズできます。")
+        st.caption(translate("theme_caption", default="配色やフォントサイズを調整して見やすいダッシュボードにカスタマイズできます。"))
 
-        default_theme_mode = st.session_state.get("ui_theme_mode", "dark")
+        current_language = get_ui_language()
+        language_index = next(
+            (idx for idx, (code, _) in enumerate(LANGUAGE_OPTIONS) if code == current_language),
+            0,
+        )
+        selected_language_label = st.selectbox(
+            translate("theme_language_label", default="表示言語"),
+            options=[label for _, label in LANGUAGE_OPTIONS],
+            index=language_index,
+            help=translate(
+                "theme_language_help",
+                default="日本語/英語の表記とヘルプを切り替えます。",
+            ),
+        )
+        label_to_code = {label: code for code, label in LANGUAGE_OPTIONS}
+        st.session_state["ui_language"] = label_to_code.get(
+            selected_language_label, DEFAULT_LANGUAGE
+        )
+
+        default_theme_mode = st.session_state.get("ui_theme_mode", "light")
         dark_mode = st.toggle(
-            "ダークテーマ",
+            translate("theme_toggle_label", default="ダークテーマ"),
             value=(default_theme_mode == "dark"),
             key="ui_theme_toggle",
-            help="ライトテーマに切り替えると背景が明るい配色になります。",
+            help=translate(
+                "theme_toggle_help",
+                default="ライトテーマに切り替えると背景が明るい配色になります。",
+            ),
         )
         st.session_state["ui_theme_mode"] = "dark" if dark_mode else "light"
 
         font_scale_default = int(round(st.session_state.get("ui_font_scale", 1.0) * 100))
         font_scale_default = max(85, min(120, font_scale_default))
         font_scale_percent = st.slider(
-            "本文フォントサイズ",
+            translate("font_size_label", default="本文フォントサイズ"),
             min_value=85,
             max_value=120,
             value=font_scale_default,
             step=5,
-            help="本文や表の文字サイズを調整します (基準値=100)。",
+            help=translate(
+                "font_size_help",
+                default="本文や表の文字サイズを調整します (基準値=100)。",
+            ),
         )
         font_scale = font_scale_percent / 100.0
         st.session_state["ui_font_scale"] = font_scale
@@ -9314,11 +9653,14 @@ def main() -> None:
             except ValueError:
                 variant_index = 0
             selected_variant = st.selectbox(
-                "暗色テーマのコントラスト",
+                translate("dark_variant_label", default="暗色テーマのコントラスト"),
                 variant_options,
                 index=variant_index,
                 format_func=lambda key: DARK_THEME_VARIANT_LABELS.get(key, key),
-                help="暗色テーマ時の背景/境界のコントラストを調整します。",
+                help=translate(
+                    "dark_variant_help",
+                    default="暗色テーマ時の背景/境界のコントラストを調整します。",
+                ),
             )
             st.session_state["ui_dark_variant_saved"] = selected_variant
             st.session_state["ui_dark_variant"] = selected_variant
@@ -9330,11 +9672,14 @@ def main() -> None:
             except ValueError:
                 palette_index = 0
             selected_palette = st.selectbox(
-                "チャートカラーパレット",
+                translate("palette_label", default="チャートカラーパレット"),
                 palette_options,
                 index=palette_index,
                 format_func=lambda key: str(COLOR_PALETTE_PRESETS[key]["label"]),
-                help="色覚多様性に配慮した配色に切り替えられます。",
+                help=translate(
+                    "palette_help",
+                    default="色覚多様性に配慮した配色に切り替えられます。",
+                ),
             )
             st.session_state["ui_dark_palette_saved"] = selected_palette
             st.session_state["ui_color_palette"] = selected_palette
@@ -11254,9 +11599,19 @@ def main() -> None:
         st.markdown("アプリの使い方や改善要望があれば開発チームまでご連絡ください。")
 
     st.markdown(
-        "<div class='back-to-top'><a href='#page-top'>⬆ トップへ戻る</a></div>",
+        "<div class='back-to-top'><a href='#page-top' aria-label='{aria}'>{icon} {label}</a></div>".format(
+            aria=html.escape(
+                translate("back_to_top_aria", default="ページの先頭へ戻る")
+            ),
+            icon="⬆",
+            label=html.escape(
+                translate("back_to_top_label", default="トップへ戻る")
+            ),
+        ),
         unsafe_allow_html=True,
     )
+
+    apply_accessibility_enhancements()
 
 
 if __name__ == "__main__":
