@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
-from urllib.parse import parse_qsl, quote
+from urllib.parse import parse_qsl, quote, urlencode
 
 import numpy as np
 import pandas as pd
@@ -94,8 +94,8 @@ _PAGE_CONFIG = {
 }
 
 _THEME_CONFIG = {
-    "primaryColor": "#2563EB",
-    "backgroundColor": "#F8FAFC",
+    "primaryColor": "#0F4C81",
+    "backgroundColor": "#F3F6FB",
     "secondaryBackgroundColor": "#FFFFFF",
     "textColor": "#0F172A",
     "font": "Inter",
@@ -670,14 +670,60 @@ STATUS_PILL_DETAILS: Dict[str, Tuple[str, str, str]] = {
 
 
 PRIMARY_NAV_ITEMS: List[Dict[str, str]] = [
-    {"key": "dashboard", "label": "ダッシュボード", "icon": "DB"},
-    {"key": "sales", "label": "売上", "icon": "SL"},
-    {"key": "gross", "label": "粗利", "icon": "GR"},
-    {"key": "inventory", "label": "在庫", "icon": "IV"},
-    {"key": "cash", "label": "資金", "icon": "CS"},
-    {"key": "kpi", "label": "KPI", "icon": "KP"},
-    {"key": "scenario", "label": "シナリオ分析", "icon": "SC"},
-    {"key": "data", "label": "データ管理", "icon": "DT"},
+    {
+        "key": "dashboard",
+        "label": "ダッシュボード",
+        "icon": "DB",
+        "description": "主要KPIとアラートの要約",
+    },
+    {
+        "key": "sales",
+        "label": "売上",
+        "icon": "SL",
+        "description": "チャネル別・期間別の売上分析",
+    },
+    {
+        "key": "gross",
+        "label": "粗利",
+        "icon": "GR",
+        "description": "粗利率と商品別の貢献分析",
+    },
+    {
+        "key": "inventory",
+        "label": "在庫",
+        "icon": "IV",
+        "description": "在庫回転と欠品リスクの把握",
+    },
+    {
+        "key": "cash",
+        "label": "資金",
+        "icon": "CS",
+        "description": "キャッシュフローと資金残高の推移",
+    },
+    {
+        "key": "kpi",
+        "label": "KPI",
+        "icon": "KP",
+        "description": "KPIの履歴とセグメント分析",
+    },
+    {
+        "key": "scenario",
+        "label": "シナリオ分析",
+        "icon": "SC",
+        "description": "計画シナリオと予測比較",
+    },
+    {
+        "key": "data",
+        "label": "データ管理",
+        "icon": "DT",
+        "description": "データ前処理と連携状況の確認",
+    },
+    {
+        "key": "guide",
+        "label": "使い方ガイド",
+        "icon": "GD",
+        "description": "データ前提条件と操作手順",
+    },
 ]
 
 NAV_LABEL_LOOKUP: Dict[str, str] = {item["key"]: item["label"] for item in PRIMARY_NAV_ITEMS}
@@ -696,7 +742,7 @@ TUTORIAL_INDEX: List[Dict[str, Any]] = [
 
 PRIMARY_COLOR = "#0F4C81"
 SECONDARY_COLOR = "#0B2E59"
-ACCENT_COLOR = "#1B9AAA"
+ACCENT_COLOR = "#2563EB"
 BACKGROUND_COLOR = "#FFFFFF"
 SURFACE_COLOR = "#F1F5F9"
 SUCCESS_COLOR = "#0F766E"
@@ -1604,14 +1650,6 @@ def inject_mckinsey_style(
             box-shadow: var(--shadow-md);
             overflow: visible;
         }}
-        .surface-card.main-nav-block {{
-            position: sticky;
-            top: 1.5rem;
-            z-index: 40;
-            padding: 1.5rem 2rem;
-            margin-bottom: var(--spacing-md);
-            backdrop-filter: blur(8px);
-        }}
         .surface-card.quick-actions-block {{
             margin-bottom: var(--spacing-md);
         }}
@@ -1686,7 +1724,7 @@ def inject_mckinsey_style(
             margin-left: 0.25rem;
         }}
         .hero-panel {{
-            background: linear-gradient(135deg, rgba(11,31,59,0.9), rgba(30,136,229,0.75));
+            background: linear-gradient(135deg, rgba(15,76,129,0.92), rgba(37,99,235,0.82));
             border-radius: var(--radius-panel);
             padding: 2.5rem 3rem;
             box-shadow: var(--shadow-lg);
@@ -1858,6 +1896,47 @@ def inject_mckinsey_style(
             font-weight: 600;
             color: var(--muted-text-color);
         }}
+        .kpi-highlight-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: var(--spacing-sm);
+            margin: var(--spacing-sm) 0 var(--spacing-md);
+        }}
+        .kpi-highlight-card {{
+            background: var(--surface-color);
+            border-radius: var(--radius-card);
+            padding: 1.35rem 1.5rem;
+            border: 1px solid var(--border-subtle-color);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            min-height: 150px;
+        }}
+        .kpi-highlight-card__label {{
+            font-size: 0.85rem;
+            letter-spacing: 0.04em;
+            color: var(--muted-text-color);
+            font-weight: 600;
+        }}
+        .kpi-highlight-card__value {{
+            font-size: 1.65rem;
+            font-weight: 700;
+            color: var(--text-color);
+            font-family: var(--numeric-font-family);
+            font-variant-numeric: tabular-nums;
+        }}
+        .kpi-highlight-card__delta {{
+            font-size: 0.9rem;
+            font-weight: 600;
+        }}
+        .kpi-highlight-card__target {{
+            font-size: 0.8rem;
+            color: var(--caption-text-color);
+        }}
+        .kpi-highlight-card__target strong {{
+            color: var(--muted-text-color);
+        }}
         .dashboard-meta {{
             display: flex;
             flex-wrap: wrap;
@@ -1897,6 +1976,25 @@ def inject_mckinsey_style(
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
+        }}
+        .info-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-chip);
+            background: rgba(15,76,129,0.12);
+            color: var(--primary-color);
+            font-weight: 600;
+            font-size: 0.8rem;
+        }}
+        .info-badge .ui-icon {{
+            background: rgba(15,76,129,0.18);
+            color: var(--primary-color);
+        }}
+        .info-badge__text a {{
+            color: inherit;
+            text-decoration: underline;
         }}
         .dashboard-filter-chips-anchor + div[data-testid="stHorizontalBlock"] {{
             display: flex;
@@ -2102,6 +2200,60 @@ def inject_mckinsey_style(
             color: var(--text-color);
             border-right: 1px solid var(--border-subtle-color);
         }}
+        section[data-testid="stSidebar"] > div:first-child {{
+            padding: 1.5rem 1.25rem 2rem;
+            background: linear-gradient(180deg, rgba(15,76,129,0.08), rgba(15,76,129,0));
+        }}
+        .sidebar-nav__heading {{
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--muted-text-color);
+            margin-bottom: 0.6rem;
+        }}
+        .sidebar-nav {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            margin-bottom: var(--spacing-md);
+        }}
+        .sidebar-nav__item {{
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.55rem 0.85rem;
+            border-radius: var(--radius-input);
+            text-decoration: none;
+            background: rgba(15,76,129,0.06);
+            color: var(--muted-text-color);
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }}
+        .sidebar-nav__item .ui-icon {{
+            min-width: 1.4rem;
+            width: 1.4rem;
+            height: 1.4rem;
+            font-size: 0.7rem;
+        }}
+        .sidebar-nav__item:hover {{
+            background: rgba(37,99,235,0.15);
+            color: var(--primary-color);
+            text-decoration: none;
+            box-shadow: inset 0 0 0 1px rgba(37,99,235,0.2);
+        }}
+        .sidebar-nav__item.is-active {{
+            background: linear-gradient(135deg, rgba(15,76,129,0.95), rgba(37,99,235,0.85));
+            color: #ffffff;
+            box-shadow: 0 8px 16px rgba(15,76,129,0.25);
+        }}
+        .sidebar-nav__item.is-active .ui-icon {{
+            background: rgba(255,255,255,0.24);
+            color: #ffffff;
+        }}
+        .sidebar-nav__label {{
+            flex: 1;
+        }}
         section[data-testid="stSidebar"] .sidebar-section {{
             background: var(--surface-color);
             border-radius: var(--radius-card);
@@ -2120,24 +2272,6 @@ def inject_mckinsey_style(
             color: var(--accent-color);
             font-size: 0.8rem;
             font-weight: 600;
-        }}
-        .main-nav-block div[role="radiogroup"] {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.6rem;
-        }}
-        .main-nav-block div[role="radiogroup"] label {{
-            padding: 0.5rem 1.2rem;
-            border-radius: var(--radius-chip);
-            border: 1px solid var(--border-strong-color);
-            background: var(--surface-color);
-            font-weight: 600;
-            color: var(--text-color);
-        }}
-        .main-nav-block div[role="radiogroup"] label[aria-checked="true"] {{
-            background: var(--primary-color);
-            color: #ffffff;
-            border-color: var(--border-strong-color);
         }}
         .search-card input {{
             border-radius: var(--radius-input);
@@ -2189,6 +2323,26 @@ def inject_mckinsey_style(
             }}
             .hero-panel {{
                 padding: 2rem 1.8rem;
+            }}
+            .kpi-highlight-card {{
+                padding: 1.1rem 1.25rem;
+            }}
+        }}
+        @media (max-width: 600px) {{
+            main .block-container {{
+                padding: 1.75rem 1.2rem 2.25rem;
+            }}
+            .hero-title {{
+                font-size: 1.45rem;
+            }}
+            .hero-panel {{
+                padding: 1.8rem 1.4rem;
+            }}
+            .kpi-highlight-card__value {{
+                font-size: 1.45rem;
+            }}
+            .dashboard-meta {{
+                position: static;
             }}
         }}
         .onboarding-wizard {{
@@ -3481,6 +3635,10 @@ def jump_to_section(section_key: str) -> None:
         return
     st.session_state["main_nav"] = section_key
     st.session_state["main_nav_display"] = NAV_OPTION_LOOKUP[section_key]
+    current_params = st.experimental_get_query_params()
+    updated_params = {key: value[:] for key, value in current_params.items()}
+    updated_params["nav"] = [section_key]
+    st.experimental_set_query_params(**updated_params)
     trigger_rerun()
 
 
@@ -5723,28 +5881,63 @@ def enhanced_number_input(
 
 
 def render_navigation() -> Tuple[str, str]:
-    """トップレベルのナビゲーションを描画し、選択されたキーと表示ラベルを返す。"""
+    """サイドバーに主要ナビゲーションを描画し、選択状態を返す。"""
 
-    current_key = st.session_state.get("main_nav", PRIMARY_NAV_ITEMS[0]["key"])
-    if current_key not in NAV_OPTION_LOOKUP:
-        current_key = PRIMARY_NAV_ITEMS[0]["key"]
+    default_key = PRIMARY_NAV_ITEMS[0]["key"]
+    current_key = st.session_state.get("main_nav", default_key)
+    if current_key not in NAV_LABEL_LOOKUP:
+        current_key = default_key
 
-    options = list(NAV_OPTION_LOOKUP.keys())
-    default_index = options.index(current_key) if current_key in options else 0
-    selected_key = st.radio(
-        "メインナビゲーション",
-        options,
-        index=default_index,
-        key="main_nav_radio",
-        horizontal=True,
-        label_visibility="collapsed",
-        format_func=lambda key: NAV_OPTION_LOOKUP.get(key, key),
+    query_params = st.experimental_get_query_params()
+    requested_values = query_params.get("nav")
+    if requested_values:
+        candidate = requested_values[0]
+        if candidate in NAV_LABEL_LOOKUP:
+            current_key = candidate
+
+    base_params = {key: value[:] for key, value in query_params.items() if key != "nav"}
+
+    nav_container = st.sidebar.container()
+    nav_container.markdown(
+        "<div class='sidebar-nav__heading'>ナビゲーション</div>",
+        unsafe_allow_html=True,
     )
-    selected_label = NAV_OPTION_LOOKUP[selected_key]
 
-    st.session_state["main_nav"] = selected_key
-    st.session_state["main_nav_display"] = selected_label
-    return selected_key, NAV_LABEL_LOOKUP[selected_key]
+    link_items: List[str] = []
+    for item in PRIMARY_NAV_ITEMS:
+        item_key = item["key"]
+        is_active = item_key == current_key
+        tone = "accent" if is_active else "muted"
+        icon_html = build_ui_icon(item["icon"], tone=tone)
+        tooltip = item.get("description") or item["label"]
+        params = {key: value[:] for key, value in base_params.items()}
+        params["nav"] = [item_key]
+        query_string = urlencode(params, doseq=True)
+        link_items.append(
+            "<a class='sidebar-nav__item {active}' href='?{qs}' title='{tooltip}'>"
+            "{icon}<span class='sidebar-nav__label'>{label}</span></a>".format(
+                active="is-active" if is_active else "",
+                qs=html.escape(query_string, quote=True),
+                tooltip=html.escape(tooltip),
+                icon=icon_html,
+                label=html.escape(item["label"]),
+            )
+        )
+
+    nav_container.markdown(
+        "<nav class='sidebar-nav'>{items}</nav>".format(items="".join(link_items)),
+        unsafe_allow_html=True,
+    )
+
+    if query_params.get("nav", [None])[0] != current_key:
+        updated_params = {key: value[:] for key, value in base_params.items()}
+        updated_params["nav"] = [current_key]
+        st.experimental_set_query_params(**updated_params)
+
+    selected_label = NAV_LABEL_LOOKUP[current_key]
+    st.session_state["main_nav"] = current_key
+    st.session_state["main_nav_display"] = NAV_OPTION_LOOKUP[current_key]
+    return current_key, selected_label
 
 
 def render_breadcrumb(current_label: str) -> None:
@@ -6697,6 +6890,61 @@ def _build_first_level_kpi_metrics(
         )
 
     return metrics
+
+
+def render_kpi_highlight_cards(
+    metrics: Sequence[Dict[str, Any]], *, help_language: str = "ja"
+) -> None:
+    """主要KPIカードをグリッド表示する。"""
+
+    if not metrics:
+        st.info("主要KPIを表示するためのデータが不足しています。")
+        return
+
+    cards: List[str] = []
+    for metric in metrics:
+        value_display = metric.get("value") or "-"
+        delta_text = metric.get("delta_text") or "前期比 -"
+        delta_state = kpi_delta_class(metric.get("delta_value"))
+        delta_class = "kpi-highlight-card__delta"
+        if delta_state:
+            delta_class += f" {delta_state}"
+
+        tooltip_attr = ""
+        definition_key = metric.get("definition_key")
+        if definition_key:
+            help_entry = get_kpi_help(definition_key, help_language)
+            if help_entry:
+                tooltip_bits: List[str] = []
+                formula_text = help_entry.get("formula")
+                interpretation_text = help_entry.get("interpretation")
+                if formula_text:
+                    tooltip_bits.append(f"計算式: {formula_text}")
+                if interpretation_text:
+                    tooltip_bits.append(f"解釈: {interpretation_text}")
+                if tooltip_bits:
+                    tooltip_attr = " title='{text}'".format(
+                        text=html.escape(" / ".join(tooltip_bits))
+                    )
+
+        cards.append(
+            "<div class='kpi-highlight-card'{tooltip}>"
+            "<div class='kpi-highlight-card__label'>{label}</div>"
+            "<div class='kpi-highlight-card__value'>{value}</div>"
+            "<div class='{delta_class}'>{delta}</div>"
+            "</div>".format(
+                tooltip=tooltip_attr,
+                label=html.escape(str(metric.get("label", "指標"))),
+                value=html.escape(str(value_display)),
+                delta_class=delta_class,
+                delta=html.escape(str(delta_text)),
+            )
+        )
+
+    st.markdown(
+        "<div class='kpi-highlight-grid'>{cards}</div>".format(cards="".join(cards)),
+        unsafe_allow_html=True,
+    )
 
 
 def render_first_level_kpi_strip(
@@ -11475,10 +11723,7 @@ def main() -> None:
 
     search_query = render_search_bar()
 
-    with st.container():
-        st.markdown("<div class='surface-card main-nav-block'>", unsafe_allow_html=True)
-        selected_nav_key, selected_nav_label = render_navigation()
-        st.markdown("</div>", unsafe_allow_html=True)
+    selected_nav_key, selected_nav_label = render_navigation()
 
     quick_action_feedback = st.session_state.pop("quick_action_feedback", None)
 
@@ -11644,7 +11889,13 @@ def main() -> None:
                     action_key="warning_gross_margin_button",
                 )
 
-            render_kgi_cards(selected_kpi_row, period_row, default_cash_forecast, starting_cash)
+            render_hero_section(
+                latest_label,
+                range_label,
+                total_records,
+                alert_count,
+            )
+            render_status_banner(alerts)
             render_dashboard_meta(
                 latest_label,
                 range_label,
@@ -11654,84 +11905,134 @@ def main() -> None:
                 channel_selection=selected_channels,
                 category_selection=selected_categories,
             )
-            render_status_banner(alerts)
+
+            data_prereq_tooltip = (
+                "売上データ: 受注日・チャネル・商品コード・売上金額\n"
+                "原価データ: 商品コード・原価・原価率\n"
+                "サブスクKPI: 月次会員数・解約数・ARPU"
+            )
+            info_icon = build_ui_icon("i", tone="accent")
+            guide_params = {
+                key: value[:]
+                for key, value in st.experimental_get_query_params().items()
+            }
+            guide_params["nav"] = ["guide"]
+            guide_url = "?" + urlencode(guide_params, doseq=True)
+            st.markdown(
+                "<div class='info-badge' title='{tooltip}'>{icon}<span class='info-badge__text'>"
+                "データ前提条件を確認 <a href=\"{url}\">使い方ガイド</a></span></div>".format(
+                    tooltip=html.escape(data_prereq_tooltip),
+                    icon=info_icon,
+                    url=html.escape(guide_url, quote=True),
+                ),
+                unsafe_allow_html=True,
+            )
             st.caption(f"対象期間: {period_start} 〜 {period_end}")
 
-            help_language = render_kpi_help_controls()
-            kpi_metrics = render_first_level_kpi_strip(
-                kpi_period_summary,
-                selected_kpi_row,
-                help_language=help_language,
-            )
-            bsc_quadrants = build_bsc_quadrants(selected_kpi_row)
-            if bsc_quadrants:
-                st.markdown("### バランスト・スコアカード")
-                bsc_view_mode = persistent_segmented_control(
-                    "bsc_view_mode",
-                    ["カード", "チャート"],
-                    default="カード",
-                    help_text="カード表示と四象限チャートを切り替えます。",
-                    label="BSC表示切替",
-                    label_visibility="collapsed",
-                )
-                if bsc_view_mode == "カード":
-                    render_bsc_cards_grid(bsc_quadrants)
-                else:
-                    render_bsc_quadrant_chart(bsc_quadrants)
-                st.caption("ターゲットを達成した象限はハイライト表示されます。")
+            render_kgi_cards(selected_kpi_row, period_row, default_cash_forecast, starting_cash)
 
-            render_active_kpi_details(
-                kpi_period_summary,
-                kpi_metrics,
-                help_language=help_language,
+            highlight_language = st.session_state.get(
+                "kpi_help_language", get_ui_language()
             )
+            highlight_metrics = _build_first_level_kpi_metrics(
+                kpi_period_summary, selected_kpi_row
+            )
+            render_kpi_highlight_cards(
+                highlight_metrics, help_language=highlight_language
+            )
+
+            quick_links = [
+                ("売上分析へ", "sales", "チャネル・カテゴリ別の売上を確認"),
+                ("在庫と資金へ", "inventory", "在庫回転と資金繰りを掘り下げ"),
+                ("KPI詳細へ", "kpi", "履歴とセグメント別のKPIを比較"),
+            ]
+            quick_columns = st.columns(len(quick_links))
+            for column, (label, target, caption) in zip(quick_columns, quick_links):
+                with column:
+                    if st.button(
+                        label,
+                        key=f"dashboard_quicklink_{target}",
+                        type="secondary",
+                        use_container_width=True,
+                    ):
+                        jump_to_section(target)
+                    st.caption(caption)
 
             preferred_tab = st.session_state.pop("preferred_dashboard_tab", None)
             if preferred_tab:
                 st.info(f"「{preferred_tab}」タブで詳細設定を確認できます。")
 
-            sales_tab, finance_tab, data_tab = st.tabs(
-                ["売上・粗利", "在庫・資金", "KPI・データ管理"]
-            )
-
-            with sales_tab:
-                st.markdown("#### 売上ダッシュボード")
-                render_sales_tab(
-                    merged_df,
-                    period_summary,
-                    channel_share_df,
-                    category_share_df,
-                    selected_granularity_label,
+            with st.expander("詳細ダッシュボードを開く", expanded=False):
+                help_language = render_kpi_help_controls()
+                kpi_metrics = render_first_level_kpi_strip(
+                    kpi_period_summary,
+                    selected_kpi_row,
+                    help_language=help_language,
                 )
-                st.divider()
-                st.markdown("#### 粗利分析")
-                render_gross_tab(merged_df, period_summary, selected_granularity_label)
+                bsc_quadrants = build_bsc_quadrants(selected_kpi_row)
+                if bsc_quadrants:
+                    st.markdown("### バランスト・スコアカード")
+                    bsc_view_mode = persistent_segmented_control(
+                        "bsc_view_mode",
+                        ["カード", "チャート"],
+                        default="カード",
+                        help_text="カード表示と四象限チャートを切り替えます。",
+                        label="BSC表示切替",
+                        label_visibility="collapsed",
+                    )
+                    if bsc_view_mode == "カード":
+                        render_bsc_cards_grid(bsc_quadrants)
+                    else:
+                        render_bsc_quadrant_chart(bsc_quadrants)
+                    st.caption("ターゲットを達成した象限はハイライト表示されます。")
 
-            with finance_tab:
-                st.markdown("#### 在庫・オペレーション")
-                render_inventory_tab(merged_df, kpi_period_summary, selected_kpi_row)
-                st.divider()
-                st.markdown("#### 資金繰りとキャッシュフロー")
-                render_cash_tab(
-                    default_cash_plan,
-                    default_cash_forecast,
-                    starting_cash,
-                    monthly_summary,
+                render_active_kpi_details(
+                    kpi_period_summary,
+                    kpi_metrics,
+                    help_language=help_language,
                 )
 
-            with data_tab:
-                st.markdown("#### KPI詳細指標")
-                render_kpi_overview_tab(kpi_period_summary)
-                st.divider()
-                st.markdown("#### データ連携状況")
-                render_data_status_section(
-                    merged_df,
-                    cost_df,
-                    subscription_df,
-                    use_sample_data=use_sample_data,
-                    automated_sales_data=automated_sales_data,
+                sales_tab, finance_tab, data_tab = st.tabs(
+                    ["売上・粗利", "在庫・資金", "KPI・データ管理"]
                 )
-            st.divider()
+
+                with sales_tab:
+                    st.markdown("#### 売上ダッシュボード")
+                    render_sales_tab(
+                        merged_df,
+                        period_summary,
+                        channel_share_df,
+                        category_share_df,
+                        selected_granularity_label,
+                    )
+                    st.divider()
+                    st.markdown("#### 粗利分析")
+                    render_gross_tab(merged_df, period_summary, selected_granularity_label)
+
+                with finance_tab:
+                    st.markdown("#### 在庫・オペレーション")
+                    render_inventory_tab(merged_df, kpi_period_summary, selected_kpi_row)
+                    st.divider()
+                    st.markdown("#### 資金繰りとキャッシュフロー")
+                    render_cash_tab(
+                        default_cash_plan,
+                        default_cash_forecast,
+                        starting_cash,
+                        monthly_summary,
+                    )
+
+                with data_tab:
+                    st.markdown("#### KPI詳細指標")
+                    render_kpi_overview_tab(kpi_period_summary)
+                    st.divider()
+                    st.markdown("#### データ連携状況")
+                    render_data_status_section(
+                        merged_df,
+                        cost_df,
+                        subscription_df,
+                        use_sample_data=use_sample_data,
+                        automated_sales_data=automated_sales_data,
+                    )
 
     elif selected_nav_key == "sales":
         st.subheader("売上分析")
@@ -12701,6 +13002,101 @@ def main() -> None:
 
         st.markdown("---")
         st.markdown("アプリの使い方や改善要望があれば開発チームまでご連絡ください。")
+
+    elif selected_nav_key == "guide":
+        st.subheader("使い方ガイド")
+        st.markdown(
+            "主要ダッシュボードの読み方と、データを投入する際の注意点をまとめました。"
+        )
+
+        st.markdown("### 推奨の確認ステップ")
+        st.markdown(
+            """
+            1. サイドバーで対象期間・店舗・チャネル・カテゴリを選択する。
+            2. ダッシュボードの主要KPIで異常値やアラートの有無を確認する。
+            3. 詳細が必要な場合はサイドバーのナビゲーションや下部のリンクから各分析ページに移動する。
+            """
+        )
+
+        st.markdown("### データ前提条件（サマリー）")
+        data_summary = [
+            {
+                "title": "売上データ",
+                "points": [
+                    "受注日・チャネル・商品コード・顧客ID・売上金額",
+                    "CSV/Excel形式、ヘッダー付きでUTF-8推奨",
+                ],
+            },
+            {
+                "title": "原価データ",
+                "points": [
+                    "商品コードごとの売価・原価・原価率",
+                    "月次で更新する場合は最終更新月を列に含めると可視化が安定",
+                ],
+            },
+            {
+                "title": "サブスク/KPI",
+                "points": [
+                    "月次会員数・新規/解約・ARPUなどのKPI",
+                    "CSV/Excelで年月列は YYYY-MM 形式が推奨",
+                ],
+            },
+        ]
+        summary_cols = st.columns(len(data_summary))
+        for column, entry in zip(summary_cols, data_summary):
+            with column:
+                st.markdown(f"#### {entry['title']}")
+                for point in entry["points"]:
+                    st.markdown(f"- {point}")
+
+        with st.expander("データ前提条件の詳細を見る", expanded=False):
+            st.markdown("#### 売上データ (sales.csv / Excel)")
+            st.markdown(
+                """
+                - 必須列: order_id, order_date, channel, product_code, quantity, sales_amount, customer_id
+                - 任意列: campaign, store, payment_method, gross_margin_rate
+                - 日付は ISO 形式 (YYYY-MM-DD) で記載してください。
+                """
+            )
+            st.markdown("#### 原価データ (costs.csv / Excel)")
+            st.markdown(
+                """
+                - 必須列: product_code, product_name, sales_price, cost_price, cost_rate
+                - 任意列: category, supplier, update_month
+                - 商品コードは売上データと一致する必要があります。
+                """
+            )
+            st.markdown("#### KPIデータ (subscription.csv / Excel)")
+            st.markdown(
+                """
+                - 必須列: month, active_subscribers, new_subscribers, churned_subscribers, arpu
+                - 任意列: campaign, remark, cac, roas
+                - month 列は YYYY-MM 形式で記載してください。
+                """
+            )
+
+        st.markdown("### ナビゲーションのヒント")
+        st.markdown(
+            """
+            - **ダッシュボード**: KPIのハイライトとアラートを確認し、異常があれば関連ページへ遷移します。
+            - **売上/粗利/在庫/資金**: それぞれの専門タブで詳細分析とグラフを提供します。
+            - **KPI**: 履歴推移やセグメント別の比較が可能です。必要に応じて期間を切り替えてください。
+            - **データ管理**: ファイル取り込み状況とバリデーション結果を確認できます。
+            """
+        )
+
+        st.markdown("### 参考ドキュメント")
+        st.markdown(
+            """
+            - [情報アーキテクチャとナビゲーション設計](docs/04_information_architecture_and_navigation.md)
+            - [ビジュアルデザインと配色ルール](docs/02_visual_design_and_contrast.md)
+            - [データ前提条件の詳細サンプル](docs/09_phase1_sample_data_onboarding.md)
+            """
+        )
+
+        st.success(
+            "データ前提条件を満たしていれば、サイドバーのフィルタ変更はすべて即時にダッシュボードへ反映されます。"
+        )
 
     st.markdown(
         "<div class='back-to-top'><a href='#page-top' aria-label='{aria}'>{icon} {label}</a></div>".format(
