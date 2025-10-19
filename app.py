@@ -413,6 +413,24 @@ EXPENSE_PLAN_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
 
 DEFAULT_STORE_OPTIONS = ["全社", "本店", "那覇本店", "浦添物流センター", "EC本部"]
 
+INVENTORY_COLUMN_ALIASES: Dict[str, List[str]] = {
+    "store": ["store", "店舗", "拠点", "倉庫"],
+    "category": ["category", "カテゴリ", "カテゴリー", "品目カテゴリ"],
+    "product_code": ["product_code", "商品コード", "SKU", "品番"],
+    "product_name": ["product_name", "商品名", "品名"],
+    "stock_quantity": ["stock_quantity", "quantity", "在庫数量", "在庫数"],
+    "unit_cost": ["unit_cost", "cost", "単価", "原価"],
+    "inventory_value": [
+        "inventory_value",
+        "stock_value",
+        "estimated_inventory",
+        "inventory_amount",
+        "在庫金額",
+        "推定在庫金額",
+        "estimated_cost",
+    ],
+}
+
 T = TypeVar("T")
 
 FILTER_STATE_KEYS = {
@@ -3014,12 +3032,14 @@ def load_data(
     *,
     automated_sales: Optional[Dict[str, pd.DataFrame]] = None,
     automated_reports: Optional[List[ValidationReport]] = None,
+    automated_inventory: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Dict[str, Any]:
     """アップロード状況に応じてデータを読み込む。"""
     # TODO: アップロードされたExcelファイルを読み込んでデータフレームに統合
     sales_frames: List[pd.DataFrame] = []
     cost_frames: List[pd.DataFrame] = []
     subscription_frames: List[pd.DataFrame] = []
+    inventory_frames: List[pd.DataFrame] = []
     validation_report = ValidationReport()
 
     if use_sample:
@@ -3046,6 +3066,11 @@ def load_data(
     if automated_reports:
         for report in automated_reports:
             validation_report.extend(report)
+
+    if automated_inventory:
+        for df in automated_inventory.values():
+            if df is not None and not df.empty:
+                inventory_frames.append(df)
 
     active_saved_sales = st.session_state.get("active_saved_sales", set())
     if isinstance(active_saved_sales, list):
@@ -3098,6 +3123,7 @@ def load_data(
     sales_df = pd.concat(sales_frames, ignore_index=True) if sales_frames else pd.DataFrame()
     cost_df = pd.concat(cost_frames, ignore_index=True) if cost_frames else pd.DataFrame()
     subscription_df = pd.concat(subscription_frames, ignore_index=True) if subscription_frames else pd.DataFrame()
+    inventory_df = pd.concat(inventory_frames, ignore_index=True) if inventory_frames else pd.DataFrame()
 
     if not sales_df.empty:
         combined_duplicates = detect_duplicate_rows(sales_df)
@@ -3115,6 +3141,7 @@ def load_data(
         "sales": sales_df,
         "cost": cost_df,
         "subscription": subscription_df,
+        "inventory": inventory_df,
         "sales_validation": validation_report,
     }
 
@@ -3485,7 +3512,7 @@ def jump_to_section(section_key: str) -> None:
 
 
 def build_filter_signature(
-    store: Optional[str],
+    store: Union[None, str, Sequence[str]],
     channels: Optional[List[str]],
     categories: Optional[List[str]],
     date_range: Any,
@@ -3505,8 +3532,16 @@ def build_filter_signature(
             return value.isoformat()
         return str(value)
 
+    if isinstance(store, (list, tuple, set)):
+        store_values = [str(value) for value in store if value not in (None, "全社")]
+        store_key: Tuple[str, ...] = tuple(sorted(store_values)) if store_values else ("all",)
+    elif store in (None, "全社"):
+        store_key = ("all",)
+    else:
+        store_key = (str(store),)
+
     return (
-        store or "all",
+        store_key,
         tuple(channels or []),
         tuple(categories or []),
         _normalize_date(start_value),
@@ -6403,7 +6438,7 @@ def clear_filter_selection(filter_name: str) -> None:
         return
 
     if filter_name == "store":
-        set_state_and_widget(state_key, None)
+        set_state_and_widget(state_key, [])
     else:
         set_state_and_widget(state_key, [])
     trigger_rerun()
@@ -6414,7 +6449,7 @@ def render_dashboard_meta(
     period_label: str,
     record_count: int,
     alert_count: int,
-    store_selection: Optional[str] = None,
+    store_selection: Optional[Sequence[str]] = None,
     channel_selection: Optional[Sequence[str]] = None,
     category_selection: Optional[Sequence[str]] = None,
 ) -> None:
@@ -6449,14 +6484,21 @@ def render_dashboard_meta(
         return "、".join(display_values[:2]) + f" ほか{len(display_values) - 2}件"
 
     if store_selection:
-        filter_entries.append(
-            {
-                "label": "店舗",
-                "value": str(store_selection),
-                "filter": "store",
-                "help": "店舗フィルタをクリア",
-            }
-        )
+        store_values = [str(value) for value in store_selection if value]
+        if store_values:
+            if all(value == "全社" for value in store_values):
+                formatted_store = "全社"
+            else:
+                filtered_store_values = [value for value in store_values if value != "全社"]
+                formatted_store = _format_list(filtered_store_values or ["全社"])
+            filter_entries.append(
+                {
+                    "label": "店舗",
+                    "value": formatted_store,
+                    "filter": "store",
+                    "help": "店舗フィルタをクリア",
+                }
+            )
 
     if channel_selection:
         formatted = _format_list(channel_selection)
@@ -7571,7 +7613,7 @@ def render_store_comparison_chart(
     analysis_df: pd.DataFrame,
     fixed_cost: float,
     *,
-    selected_store: Optional[str] = None,
+    selected_store: Optional[Sequence[str]] = None,
 ) -> None:
     """店舗別の売上・粗利・営業利益(推計)を横棒で比較表示する。"""
 
@@ -7619,11 +7661,19 @@ def render_store_comparison_chart(
 
     melted["metric_label"] = melted["metric"].map(metric_map)
     color_sequence = [SALES_SERIES_COLOR, GROSS_SERIES_COLOR, OPERATING_SERIES_COLOR]
-    chart_title = (
-        f"{selected_store}の売上・利益比較"
-        if selected_store
-        else "店舗別売上・利益比較"
-    )
+    chart_title = "店舗別売上・利益比較"
+    if selected_store:
+        selected_values = [
+            str(value) for value in selected_store if value and value != "全社"
+        ]
+        if selected_values:
+            if len(selected_values) <= 2:
+                scope_label = "・".join(selected_values)
+            else:
+                scope_label = "・".join(selected_values[:2]) + f" 他{len(selected_values) - 2}店舗"
+            chart_title = f"{scope_label}の売上・利益比較"
+        elif any(value == "全社" for value in selected_store):
+            chart_title = "全社の売上・利益比較"
     comparison_chart = px.bar(
         melted,
         x="value",
@@ -7736,17 +7786,66 @@ def render_abc_analysis(df: pd.DataFrame) -> None:
         )
 
 
+def _normalize_inventory_snapshot(snapshot: pd.DataFrame) -> pd.DataFrame:
+    """外部サービスから取得した在庫データの列名を統一し、在庫金額を算出する。"""
+
+    if snapshot is None or snapshot.empty:
+        return pd.DataFrame()
+
+    normalized = snapshot.copy()
+    rename_map: Dict[str, str] = {}
+    for canonical, aliases in INVENTORY_COLUMN_ALIASES.items():
+        for alias in aliases:
+            if alias in normalized.columns and alias != canonical:
+                rename_map[alias] = canonical
+                break
+    if rename_map:
+        normalized.rename(columns=rename_map, inplace=True)
+
+    if "estimated_cost" not in normalized.columns:
+        if "inventory_value" in normalized.columns:
+            normalized.rename(columns={"inventory_value": "estimated_cost"}, inplace=True)
+        elif {"unit_cost", "stock_quantity"}.issubset(normalized.columns):
+            normalized["estimated_cost"] = (
+                pd.to_numeric(normalized["unit_cost"], errors="coerce")
+                * pd.to_numeric(normalized["stock_quantity"], errors="coerce")
+            )
+
+    required = {"store", "category", "estimated_cost"}
+    if not required.issubset(normalized.columns):
+        return pd.DataFrame()
+
+    preserved_columns = [
+        column
+        for column in [
+            "store",
+            "category",
+            "estimated_cost",
+            "product_code",
+            "product_name",
+            "stock_quantity",
+        ]
+        if column in normalized.columns
+    ]
+    normalized = normalized[preserved_columns]
+    normalized.dropna(subset=["store", "category", "estimated_cost"], inplace=True)
+    return normalized
+
+
 def render_inventory_heatmap(
-    merged_df: pd.DataFrame, selected_kpi_row: Optional[pd.Series]
+    merged_df: pd.DataFrame,
+    selected_kpi_row: Optional[pd.Series],
+    inventory_snapshot: Optional[pd.DataFrame] = None,
 ) -> None:
     """店舗×カテゴリの在庫状況をヒートマップで表示する。"""
 
-    if merged_df is None or merged_df.empty:
-        st.info("在庫ヒートマップを準備中です。元データのアップロードをお待ちください。")
-        return
+    overlay_df = _normalize_inventory_snapshot(inventory_snapshot)
     required_columns = {"store", "category", "estimated_cost"}
-    if not required_columns.issubset(merged_df.columns):
-        st.info("在庫推計に必要な列が不足しています。データ整備が完了次第、自動で表示されます。")
+    has_merged_inventory = merged_df is not None and not merged_df.empty and required_columns.issubset(merged_df.columns)
+    has_overlay_inventory = not overlay_df.empty
+
+    if not has_merged_inventory and not has_overlay_inventory:
+        st.info("在庫ヒートマップを準備中です。元データのアップロードまたはAPI連携の設定をお待ちください。")
         return
 
     turnover_days = None
@@ -7755,9 +7854,14 @@ def render_inventory_heatmap(
     if turnover_days is None or pd.isna(turnover_days) or float(turnover_days) <= 0:
         turnover_days = 45.0
 
-    inventory_value = (
-        merged_df.groupby(["store", "category"])["estimated_cost"].sum().reset_index()
-    )
+    if has_overlay_inventory:
+        inventory_value = (
+            overlay_df.groupby(["store", "category"])["estimated_cost"].sum().reset_index()
+        )
+    else:
+        inventory_value = (
+            merged_df.groupby(["store", "category"])["estimated_cost"].sum().reset_index()
+        )
     if inventory_value.empty:
         st.info("カテゴリ別の在庫データを準備中です。もうしばらくお待ちください。")
         return
@@ -7803,6 +7907,8 @@ def render_inventory_tab(
     merged_df: pd.DataFrame,
     kpi_period_summary: pd.DataFrame,
     selected_kpi_row: pd.Series,
+    *,
+    inventory_snapshot: Optional[pd.DataFrame] = None,
 ) -> None:
     """在庫タブの主要指標と推計表を表示する。"""
 
@@ -7814,6 +7920,27 @@ def render_inventory_tab(
 
     if turnover_days_value <= 0:
         turnover_days_value = 45.0
+
+    inventory_overlay = _normalize_inventory_snapshot(inventory_snapshot)
+    if not inventory_overlay.empty:
+        st.caption("API連携から取得した在庫スナップショットを反映しています。")
+        with st.expander("連携済み在庫データのプレビュー", expanded=False):
+            preview_columns = [
+                column
+                for column in [
+                    "store",
+                    "category",
+                    "product_name",
+                    "stock_quantity",
+                    "estimated_cost",
+                ]
+                if column in inventory_overlay.columns
+            ]
+            st.dataframe(
+                inventory_overlay[preview_columns].head(100),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     if kpi_period_summary is not None and not kpi_period_summary.empty:
         st.markdown("<div class='chart-section'>", unsafe_allow_html=True)
@@ -8030,7 +8157,11 @@ def render_inventory_tab(
             "<div class='chart-section__header'><div class='chart-section__title'>在庫ヒートマップ</div></div>",
             unsafe_allow_html=True,
         )
-        render_inventory_heatmap(merged_df, selected_kpi_row)
+        render_inventory_heatmap(
+            merged_df,
+            selected_kpi_row,
+            inventory_snapshot=inventory_overlay,
+        )
 
         st.markdown(
             "<div class='chart-section__header'><div class='chart-section__title'>売れ残りリスク商品</div></div>",
@@ -8042,6 +8173,28 @@ def render_inventory_tab(
             ]
             .sum()
         )
+        if not inventory_overlay.empty and {
+            "product_code",
+            "product_name",
+            "category",
+        }.issubset(inventory_overlay.columns):
+            overlay_product_summary = (
+                inventory_overlay.groupby(
+                    ["product_code", "product_name", "category"], as_index=False
+                )["estimated_cost"].sum()
+            )
+            slow_mover_df = slow_mover_df.merge(
+                overlay_product_summary,
+                on=["product_code", "product_name", "category"],
+                how="outer",
+                suffixes=("", "_overlay"),
+            )
+            slow_mover_df["sales_amount"].fillna(0.0, inplace=True)
+            slow_mover_df["quantity"].fillna(0.0, inplace=True)
+            slow_mover_df["estimated_cost"] = slow_mover_df[
+                ["estimated_cost", "estimated_cost_overlay"]
+            ].sum(axis=1, skipna=True)
+            slow_mover_df.drop(columns=["estimated_cost_overlay"], inplace=True)
         if slow_mover_df.empty:
             st.info("売れ残りリスクを評価するための商品別データが不足しています。")
         else:
@@ -8105,6 +8258,28 @@ def render_inventory_tab(
                 )
                 .reset_index()
             )
+            if not inventory_overlay.empty and {
+                "product_code",
+                "product_name",
+                "category",
+            }.issubset(inventory_overlay.columns):
+                overlay_summary = (
+                    inventory_overlay.groupby(
+                        ["product_code", "product_name", "category"], as_index=False
+                    )["estimated_cost"].sum()
+                )
+                detail_df = detail_df.merge(
+                    overlay_summary,
+                    on=["product_code", "product_name", "category"],
+                    how="outer",
+                    suffixes=("", "_overlay"),
+                )
+                detail_df["販売数量"].fillna(0.0, inplace=True)
+                detail_df["売上高"].fillna(0.0, inplace=True)
+                detail_df["推定原価"] = detail_df[["推定原価", "estimated_cost_overlay"]].sum(
+                    axis=1, skipna=True
+                )
+                detail_df.drop(columns=["estimated_cost_overlay"], inplace=True)
             if detail_df.empty:
                 st.info("表示できる明細がありません。")
             else:
@@ -9421,7 +9596,10 @@ def render_shared_scenario_preview() -> None:
 
 
 def run_scenario_projection(
-    monthly_sales: pd.Series, scenario: Dict[str, Any]
+    monthly_sales: pd.Series,
+    scenario: Dict[str, Any],
+    cash_plan: Optional[pd.DataFrame] = None,
+    default_starting_cash: float = 0.0,
 ) -> Tuple[str, pd.DataFrame, Dict[str, Any], pd.DataFrame, pd.DataFrame]:
     """シナリオ設定に基づき将来12〜36ヶ月の推移を試算する。"""
 
@@ -9437,6 +9615,10 @@ def run_scenario_projection(
     unit_price_adjust_pct = float(scenario.get("unit_price_adjust_pct", 10.0))
     quantity_adjust_pct = float(scenario.get("quantity_adjust_pct", 10.0))
     fixed_cost_adjust_pct = float(scenario.get("fixed_cost_adjust_pct", 10.0))
+    cost_rate_change_pct = float(scenario.get("cost_rate_change_pct", 0.0)) / 100.0
+    fx_rate = max(0.1, float(scenario.get("fx_rate", 1.0)))
+    fx_change_pct = float(scenario.get("fx_change_pct", 0.0)) / 100.0
+    starting_cash = float(scenario.get("starting_cash", default_starting_cash))
 
     base_series = monthly_sales.copy() if monthly_sales is not None else pd.Series(dtype=float)
     if base_series.empty:
@@ -9459,12 +9641,58 @@ def run_scenario_projection(
             start_period = pd.Period(date.today(), freq="M")
     projection_periods = pd.period_range(start=start_period + 1, periods=horizon, freq="M")
 
-    cumulative_cash = funding
+    unit_price_multiplier = 1 + unit_price_adjust_pct / 100.0
+    quantity_multiplier = 1 + quantity_adjust_pct / 100.0
+    fx_multiplier = max(0.0, (fx_rate * (1 + fx_change_pct)) / fx_rate)
+    fixed_cost_multiplier = 1 + fixed_cost_adjust_pct / 100.0
+    adjusted_fixed_cost = monthly_fixed_cost * fixed_cost_multiplier
+
+    cost_ratio = max(0.0, 1 - margin)
+    adjusted_cost_ratio = min(0.99, max(0.0, cost_ratio * (1 + cost_rate_change_pct)))
+    effective_margin = max(0.0, 1 - adjusted_cost_ratio)
+
+    plan_df = None
+    if cash_plan is not None and not cash_plan.empty:
+        plan_df = cash_plan.copy()
+        if len(plan_df) < horizon:
+            repeat_count = horizon - len(plan_df)
+            if repeat_count > 0:
+                plan_df = plan_df.reset_index(drop=True)
+                extension_rows: List[pd.Series] = []
+                last_month = plan_df.iloc[-1].get("month") if "month" in plan_df.columns else None
+                for offset in range(1, repeat_count + 1):
+                    row = plan_df.iloc[-1].copy()
+                    if last_month is not None:
+                        if isinstance(last_month, pd.Period):
+                            row["month"] = last_month + offset
+                        else:
+                            try:
+                                base_period = pd.Period(last_month, freq="M")
+                                row["month"] = base_period + offset
+                            except Exception:
+                                row["month"] = last_month
+                    extension_rows.append(row)
+                if extension_rows:
+                    plan_df = pd.concat([plan_df, pd.DataFrame(extension_rows)], ignore_index=True)
+        plan_df = plan_df.head(horizon)
+
+    cumulative_cash = starting_cash + funding
     rows: List[Dict[str, Any]] = []
     for idx, (base_value, period) in enumerate(zip(base_array, projection_periods), start=1):
-        projected_sales = base_value * ((1 + growth) ** idx)
-        projected_profit = (projected_sales * margin) - monthly_fixed_cost
+        projected_sales = base_value * ((1 + growth) ** idx) * unit_price_multiplier * quantity_multiplier * fx_multiplier
+        projected_profit = (projected_sales * effective_margin) - adjusted_fixed_cost
+        operating_cf = projected_profit
+        investment_cf = 0.0
+        financing_cf = 0.0
+        loan_repayment = 0.0
+        if plan_df is not None and idx - 1 < len(plan_df):
+            plan_row = plan_df.iloc[idx - 1]
+            investment_cf = float(plan_row.get("investment_cf", investment_cf))
+            financing_cf = float(plan_row.get("financing_cf", financing_cf))
+            loan_repayment = float(plan_row.get("loan_repayment", loan_repayment))
+        net_cf = operating_cf + financing_cf - investment_cf - loan_repayment
         cumulative_cash += projected_profit
+        cumulative_cash += financing_cf - investment_cf - loan_repayment
         rows.append(
             {
                 "scenario": scenario_name,
@@ -9477,12 +9705,18 @@ def run_scenario_projection(
                 "funding": funding,
                 "growth_pct": growth * 100,
                 "margin_pct": margin * 100,
+                "operating_cf": operating_cf,
+                "investment_cf": investment_cf,
+                "financing_cf": financing_cf,
+                "loan_repayment": loan_repayment,
+                "net_cf": net_cf,
             }
         )
 
     projection_df = pd.DataFrame(rows)
     annual_sales = float(projection_df["sales"].sum()) if not projection_df.empty else 0.0
     annual_profit = float(projection_df["profit"].sum()) if not projection_df.empty else 0.0
+    annual_operating_cf = float(projection_df["operating_cf"].sum()) if not projection_df.empty else 0.0
     summary_row = {
         "シナリオ": scenario_name,
         "年間売上": annual_sales,
@@ -9491,8 +9725,12 @@ def run_scenario_projection(
         "期末キャッシュ": float(projection_df["cash"].iloc[-1]) if not projection_df.empty else funding,
         "成長率(%)": growth * 100,
         "利益率(%)": margin * 100,
-        "調整固定費(月額)": monthly_fixed_cost,
+        "調整固定費(月額)": adjusted_fixed_cost,
         "調達額": funding,
+        "年間営業CF": annual_operating_cf,
+        "原価率変化(%)": cost_rate_change_pct * 100,
+        "為替変動(%)": fx_change_pct * 100,
+        "初期キャッシュ": starting_cash,
     }
 
     margin_center = margin * 100
@@ -9540,10 +9778,11 @@ def generate_phase2_report(
         buffer.write("[シナリオ比較サマリー]\n")
         for _, row in summary_df.iterrows():
             buffer.write(
-                "- {name}: 年間売上 {sales:,.0f} 円 / 年間利益 {profit:,.0f} 円 / 期末キャッシュ {cash:,.0f} 円\n".format(
+                "- {name}: 年間売上 {sales:,.0f} 円 / 年間利益 {profit:,.0f} 円 / 年間営業CF {operating:,.0f} 円 / 期末キャッシュ {cash:,.0f} 円\n".format(
                     name=row.get("シナリオ", "-"),
                     sales=row.get("年間売上", 0.0),
                     profit=row.get("年間利益", 0.0),
+                    operating=row.get("年間営業CF", 0.0),
                     cash=row.get("期末キャッシュ", 0.0),
                 )
             )
@@ -9719,7 +9958,14 @@ def render_scenario_analysis_section(
                 "unit_price_adjust_pct": 10.0,
                 "quantity_adjust_pct": 10.0,
                 "fixed_cost_adjust_pct": 10.0,
+                "cost_rate_change_pct": 0.0,
+                "fx_rate": 1.0,
+                "fx_change_pct": 0.0,
+                "starting_cash": float(st.session_state.get("sidebar_starting_cash", 3_000_000.0)),
             },
+        )
+        form_defaults.setdefault(
+            "starting_cash", float(st.session_state.get("sidebar_starting_cash", 3_000_000.0))
         )
         with st.form("scenario_entry_form", clear_on_submit=True):
             st.subheader("シナリオパラメータ")
@@ -9766,6 +10012,16 @@ def render_scenario_analysis_section(
                     placeholder="例: 1,500,000",
                 )
 
+            cost_rate_change_pct = float(form_defaults.get("cost_rate_change_pct", 0.0))
+            starting_cash_override = float(
+                form_defaults.get(
+                    "starting_cash",
+                    float(st.session_state.get("sidebar_starting_cash", 3_000_000.0)),
+                )
+            )
+            fx_rate_value = float(form_defaults.get("fx_rate", 1.0))
+            fx_change_pct = float(form_defaults.get("fx_change_pct", 0.0))
+
             with st.expander("詳細な感度設定", expanded=False):
                 adjust_cols = st.columns(3)
                 with adjust_cols[0]:
@@ -9807,6 +10063,58 @@ def render_scenario_analysis_section(
                         placeholder="例: 12",
                         help_text="基準固定費に対する増減幅です。",
                     )
+                cost_cols = st.columns(2)
+                with cost_cols[0]:
+                    cost_rate_change_pct = enhanced_number_input(
+                        "原価率変化 (%)",
+                        key="scenario_cost_rate_change",
+                        default_value=cost_rate_change_pct,
+                        min_value=-30.0,
+                        max_value=30.0,
+                        step=0.5,
+                        number_format="%.1f",
+                        text_format=",.1f",
+                        placeholder="例: -2",
+                        help_text="売上原価率がどれだけ増減するかを指定します。マイナス値で改善を表します。",
+                    )
+                with cost_cols[1]:
+                    starting_cash_override = enhanced_number_input(
+                        "シナリオ初期キャッシュ (円)",
+                        key="scenario_starting_cash_override",
+                        default_value=starting_cash_override,
+                        min_value=0.0,
+                        step=100_000.0,
+                        number_format="%.0f",
+                        text_format=",.0f",
+                        placeholder="例: 3,000,000",
+                        help_text="このシナリオ開始時点の現金残高です。",
+                    )
+                fx_cols = st.columns(2)
+                with fx_cols[0]:
+                    fx_rate_value = enhanced_number_input(
+                        "基準為替レート",
+                        key="scenario_fx_rate",
+                        default_value=fx_rate_value,
+                        min_value=0.1,
+                        step=0.1,
+                        number_format="%.2f",
+                        text_format=",.2f",
+                        placeholder="例: 1.00",
+                        help_text="主要通貨のレートを指定します (例: USD/JPY)。",
+                    )
+                with fx_cols[1]:
+                    fx_change_pct = enhanced_number_input(
+                        "為替変動 (%)",
+                        key="scenario_fx_change",
+                        default_value=fx_change_pct,
+                        min_value=-50.0,
+                        max_value=50.0,
+                        step=0.5,
+                        number_format="%.1f",
+                        text_format=",.1f",
+                        placeholder="例: 3",
+                        help_text="円安方向の変化はプラス、円高はマイナスで入力します。",
+                    )
             submitted = st.form_submit_button("シナリオを追加")
             if submitted:
                 form_defaults.update(
@@ -9814,6 +10122,10 @@ def render_scenario_analysis_section(
                         "unit_price_adjust_pct": float(unit_price_adjust_pct),
                         "quantity_adjust_pct": float(quantity_adjust_pct),
                         "fixed_cost_adjust_pct": float(fixed_cost_adjust_pct),
+                        "cost_rate_change_pct": float(cost_rate_change_pct),
+                        "fx_rate": float(fx_rate_value),
+                        "fx_change_pct": float(fx_change_pct),
+                        "starting_cash": float(starting_cash_override),
                     }
                 )
                 st.session_state["scenario_form_defaults"] = form_defaults
@@ -9827,6 +10139,10 @@ def render_scenario_analysis_section(
                         "unit_price_adjust_pct": float(unit_price_adjust_pct),
                         "quantity_adjust_pct": float(quantity_adjust_pct),
                         "fixed_cost_adjust_pct": float(fixed_cost_adjust_pct),
+                        "cost_rate_change_pct": float(cost_rate_change_pct),
+                        "fx_rate": float(fx_rate_value),
+                        "fx_change_pct": float(fx_change_pct),
+                        "starting_cash": float(starting_cash_override),
                         "base_sales_total": base_sales_total,
                         "base_quantity_total": base_quantity_total,
                         "base_unit_price": base_unit_price,
@@ -9843,7 +10159,8 @@ def render_scenario_analysis_section(
                 info_col.markdown(
                     f"**{scenario.get('name', 'シナリオ')}** — 成長率 {scenario.get('growth', 0.0):.1f}% / 利益率 {scenario.get('margin', 0.0):.1f}% / "
                     f"調達額 {scenario.get('funding', 0.0):,.0f} 円 / 期間 {scenario.get('horizon', 0)}ヶ月 / "
-                    f"調整幅(単価 {scenario.get('unit_price_adjust_pct', 0.0):.1f}%, 数量 {scenario.get('quantity_adjust_pct', 0.0):.1f}%, 固定費 {scenario.get('fixed_cost_adjust_pct', 0.0):.1f}%)"
+                    f"調整幅(単価 {scenario.get('unit_price_adjust_pct', 0.0):.1f}%, 数量 {scenario.get('quantity_adjust_pct', 0.0):.1f}%, 固定費 {scenario.get('fixed_cost_adjust_pct', 0.0):.1f}%) / "
+                    f"原価率変化 {scenario.get('cost_rate_change_pct', 0.0):.1f}% / 為替変動 {scenario.get('fx_change_pct', 0.0):.1f}% / 初期キャッシュ {scenario.get('starting_cash', 0.0):,.0f} 円"
                 )
                 if remove_col.button("削除", key=f"remove_scenario_{idx}"):
                     scenarios.pop(idx)
@@ -9964,10 +10281,19 @@ def render_scenario_analysis_section(
             summaries: List[Dict[str, Any]] = []
             sensitivity_frames: List[pd.DataFrame] = []
             profit_range_frames: List[pd.DataFrame] = []
+            max_horizon = max(int(scenario.get("horizon", 12) or 12) for scenario in scenarios)
+            default_starting_cash = float(st.session_state.get("sidebar_starting_cash", 3_000_000.0))
+            base_cash_plan = create_default_cashflow_plan(merged_df, horizon_months=max(6, max_horizon))
             with st.spinner("シナリオを計算しています..."):
                 with ThreadPoolExecutor(max_workers=min(4, total)) as executor:
                     futures = {
-                        executor.submit(run_scenario_projection, monthly_sales, scenario): scenario
+                        executor.submit(
+                            run_scenario_projection,
+                            monthly_sales,
+                            scenario,
+                            base_cash_plan,
+                            default_starting_cash,
+                        ): scenario
                         for scenario in scenarios
                     }
                     for idx, future in enumerate(as_completed(futures), start=1):
@@ -10021,6 +10347,10 @@ def render_scenario_analysis_section(
                             "利益率(%)": "{:.1f}",
                             "調整固定費(月額)": "{:.0f}",
                             "調達額": "{:.0f}",
+                            "年間営業CF": "{:.0f}",
+                            "原価率変化(%)": "{:.1f}",
+                            "為替変動(%)": "{:.1f}",
+                            "初期キャッシュ": "{:.0f}",
                         }
                     )
                 )
@@ -10061,6 +10391,20 @@ def render_scenario_analysis_section(
                     ],
                 ).properties(height=360)
                 st.altair_chart(apply_altair_theme(sales_chart), use_container_width=True)
+
+                cash_chart = alt.Chart(combined_df).mark_line(point=True).encode(
+                    x=alt.X("period:T", title="期間"),
+                    y=alt.Y("cash:Q", title="キャッシュ残高", axis=alt.Axis(format=",.0f")),
+                    color=alt.Color("scenario:N", title="シナリオ"),
+                    tooltip=[
+                        "scenario",
+                        "period_label",
+                        alt.Tooltip("cash", title="キャッシュ残高", format=","),
+                        alt.Tooltip("net_cf", title="月次キャッシュフロー", format=","),
+                    ],
+                ).properties(height=320)
+                st.markdown("### キャッシュ残高の推移")
+                st.altair_chart(apply_altair_theme(cash_chart), use_container_width=True)
 
                 if sensitivity_frames:
                     sensitivity_combined = pd.concat(sensitivity_frames, ignore_index=True)
@@ -10830,84 +11174,201 @@ def main() -> None:
             st.session_state["api_sales_validation"] = {}
         if "api_last_fetched" not in st.session_state:
             st.session_state["api_last_fetched"] = {}
+        if "api_inventory_data" not in st.session_state:
+            st.session_state["api_inventory_data"] = {}
+        if "api_inventory_last_fetched" not in st.session_state:
+            st.session_state["api_inventory_last_fetched"] = {}
 
         st.markdown("---")
         with st.expander("API/RPA自動連携設定", expanded=False):
             st.caption(
-                "各モールのAPIやRPAが出力したURLを登録すると、手動アップロードなしで売上データを取得できます。"
+                "会計システムやECモールのAPIを登録すると、売上・在庫データを自動取得できます。アクセストークンやキーはブラウザセッション内にのみ保持されます。"
             )
-            for channel in channel_files.keys():
-                endpoint = st.text_input(
-                    f"{channel} APIエンドポイント", key=f"api_endpoint_{channel}"
-                )
-                token = st.text_input(
-                    f"{channel} APIトークン/キー",
-                    key=f"api_token_{channel}",
-                    type="password",
-                    help="必要に応じてBasic認証やBearerトークンを設定してください。",
-                )
-                params_raw = st.text_input(
-                    f"{channel} クエリパラメータ (key=value&...)",
-                    key=f"api_params_{channel}",
-                    help="日付範囲などの条件が必要な場合に指定します。",
-                )
+            channel_candidates = list(channel_files.keys())
+            if not channel_candidates:
+                channel_candidates = PLAN_CHANNEL_OPTIONS_BASE
 
+            dataset_descriptions = {
+                "売上データ": "売上明細・チャネル別の金額を取得します。列名は既存の売上アップロード形式に合わせてください。",
+                "在庫データ": "店舗や倉庫ごとの在庫数量・金額を取得します。store/category/stock_quantityなどの列が含まれていると自動でヒートマップに反映されます。",
+            }
+
+            for channel in channel_candidates:
+                channel_slug = hashlib.md5(channel.encode("utf-8")).hexdigest()[:8]
+                wizard = st.container()
+                wizard.markdown(f"#### {channel} 連携ウィザード")
+                service_type = wizard.selectbox(
+                    "STEP 1. 連携するサービスカテゴリ",
+                    ["ECプラットフォーム", "会計システム", "その他"],
+                    key=f"api_service_type_{channel_slug}",
+                    help="対象となるサービスの種類を選ぶと入力のヒントが表示されます。",
+                )
+                dataset_type = wizard.radio(
+                    "取得したいデータ種別",
+                    ["売上データ", "在庫データ"],
+                    key=f"api_dataset_type_{channel_slug}",
+                    help="売上は売上分析タブ、在庫は在庫タブへ自動反映されます。",
+                )
+                wizard.caption(dataset_descriptions.get(dataset_type, ""))
+
+                if service_type == "会計システム":
+                    wizard.info(
+                        "例: freee会計・マネーフォワードクラウドではOAuthで取得したアクセストークンを入力します。必要に応じて勘定科目IDをクエリに追加してください。"
+                    )
+                elif service_type == "ECプラットフォーム":
+                    wizard.info(
+                        "例: 楽天RMSやAmazon SP-APIのエンドポイントURLを指定し、BearerトークンやMarketplace IDなどをクエリに含めます。"
+                    )
+
+                wizard.markdown("**STEP 2. 認証情報を入力**")
+                endpoint = wizard.text_input(
+                    "APIエンドポイントURL",
+                    key=f"api_endpoint_{channel_slug}",
+                    placeholder="https://example.com/api/v1/sales",
+                    help="GETでアクセスできるJSON/CSVエンドポイントを指定します。",
+                )
+                token = wizard.text_input(
+                    "アクセストークン / APIキー",
+                    key=f"api_token_{channel_slug}",
+                    type="password",
+                    help="BearerトークンやBasic認証のパスワードなどを入力してください。空の場合は無認証でアクセスします。",
+                )
+                secret = wizard.text_input(
+                    "シークレット / リフレッシュトークン (任意)",
+                    key=f"api_secret_{channel_slug}",
+                    type="password",
+                    help="必要な場合のみ入力してください。ストリームリットのセッション終了時に破棄されます。",
+                )
+                params_raw = wizard.text_input(
+                    "クエリパラメータ (key=value&...)",
+                    key=f"api_params_{channel_slug}",
+                    help="期間指定やフィルタ条件を指定します。例: start_date=2024-01-01&end_date=2024-12-31",
+                )
                 params_dict = _parse_api_params(params_raw)
 
-            fetch_now = st.button(f"{channel}の最新データを取得", key=f"fetch_api_{channel}")
-            if fetch_now:
-                if not endpoint:
-                    st.warning("エンドポイントURLを入力してください。")
-                else:
-                    with st.spinner(f"{channel}のデータを取得中..."):
-                        fetched_df, fetch_report = fetch_sales_from_endpoint(
-                            endpoint,
-                            token=token or None,
-                            params=params_dict,
-                            channel_hint=channel,
-                        )
-                    st.session_state["api_sales_data"][channel] = fetched_df
-                    st.session_state["api_sales_validation"][channel] = fetch_report
-                    st.session_state["api_last_fetched"][channel] = datetime.now()
-                    if fetch_report.has_errors():
-                        st.error(f"{channel}のAPI連携でエラーが発生しました。詳細はデータ管理タブをご確認ください。")
-                    elif fetch_report.has_warnings():
-                        st.warning(f"{channel}のデータは取得しましたが警告があります。データ管理タブで確認してください。")
+                wizard.markdown("**STEP 3. 接続テスト**")
+                fetch_label = f"{channel}の{dataset_type}を取得"
+                if wizard.button(fetch_label, key=f"api_fetch_{channel_slug}"):
+                    if not endpoint:
+                        wizard.warning("エンドポイントURLを入力してください。")
                     else:
-                        st.success(f"{channel}のデータ取得が完了しました。")
+                        with wizard.spinner(f"{channel}の{dataset_type}を取得中..."):
+                            fetched_df, fetch_report = fetch_sales_from_endpoint(
+                                endpoint,
+                                token=token or None,
+                                params=params_dict,
+                                channel_hint=channel,
+                            )
+                        if dataset_type == "売上データ":
+                            st.session_state["api_sales_data"][channel] = fetched_df
+                            st.session_state["api_sales_validation"][channel] = fetch_report
+                            st.session_state["api_last_fetched"][channel] = datetime.now()
+                            if fetch_report.has_errors():
+                                wizard.error(
+                                    f"{channel}のAPI連携でエラーが発生しました。詳細はデータ管理タブをご確認ください。"
+                                )
+                            elif fetch_report.has_warnings():
+                                wizard.warning(
+                                    f"{channel}のデータは取得しましたが警告があります。データ管理タブで確認してください。"
+                                )
+                            else:
+                                wizard.success(f"{channel}の売上データ取得が完了しました。")
+                        else:
+                            st.session_state["api_inventory_data"][channel] = fetched_df
+                            st.session_state["api_inventory_last_fetched"][channel] = datetime.now()
+                            wizard.success(f"{channel}の在庫データ取得が完了しました。")
 
-            last_fetch = st.session_state["api_last_fetched"].get(channel)
-            if last_fetch:
-                status_report: Optional[ValidationReport] = st.session_state["api_sales_validation"].get(channel)
+                status_container = wizard.container()
+                sales_last_fetch = st.session_state["api_last_fetched"].get(channel)
+                if sales_last_fetch:
+                    status_report: Optional[ValidationReport] = st.session_state["api_sales_validation"].get(channel)
+                    latest_df = st.session_state["api_sales_data"].get(channel)
+                    record_count = len(latest_df) if isinstance(latest_df, pd.DataFrame) else 0
+                    if status_report and status_report.has_errors():
+                        status_level = "error"
+                    elif status_report and status_report.has_warnings():
+                        status_level = "warning"
+                    else:
+                        status_level = "ok"
+                    icon_code, tone, status_label = STATUS_PILL_DETAILS.get(
+                        status_level, ("i", "muted", "情報")
+                    )
+                    status_icon = build_ui_icon(icon_code, tone=tone)
+                    status_container.markdown(
+                        "<div class='status-pill status-pill--{cls}'>{icon}<span>売上データ: {label}</span></div>".format(
+                            cls=status_level,
+                            icon=status_icon,
+                            label=html.escape(status_label),
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    status_container.markdown(
+                        f"<div class='sidebar-meta'>最終取得: {sales_last_fetch.strftime('%Y-%m-%d %H:%M')} / {record_count:,} 件</div>",
+                        unsafe_allow_html=True,
+                    )
+                inventory_last_fetch = st.session_state["api_inventory_last_fetched"].get(channel)
+                if inventory_last_fetch:
+                    status_icon = build_ui_icon("S", tone="success")
+                    status_container.markdown(
+                        "<div class='status-pill status-pill--ok'>{icon}<span>在庫データ: 正常</span></div>".format(
+                            icon=status_icon
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    latest_inventory = st.session_state["api_inventory_data"].get(channel)
+                    inventory_count = (
+                        len(latest_inventory) if isinstance(latest_inventory, pd.DataFrame) else 0
+                    )
+                    status_container.markdown(
+                        f"<div class='sidebar-meta'>最終取得: {inventory_last_fetch.strftime('%Y-%m-%d %H:%M')} / {inventory_count:,} 件</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            sales_status_rows: List[Dict[str, Any]] = []
+            for channel, last_fetch in st.session_state["api_last_fetched"].items():
+                report = st.session_state["api_sales_validation"].get(channel)
                 latest_df = st.session_state["api_sales_data"].get(channel)
                 record_count = len(latest_df) if isinstance(latest_df, pd.DataFrame) else 0
-                if status_report and status_report.has_errors():
-                    status_level = "error"
-                elif status_report and status_report.has_warnings():
-                    status_level = "warning"
+                if report and report.has_errors():
+                    status = "エラー"
+                elif report and report.has_warnings():
+                    status = "警告あり"
                 else:
-                    status_level = "ok"
-                icon_code, tone, status_label = STATUS_PILL_DETAILS.get(
-                    status_level, ("i", "muted", "情報")
+                    status = "正常"
+                sales_status_rows.append(
+                    {
+                        "チャネル": channel,
+                        "データ種別": "売上",
+                        "最終取得": last_fetch.strftime("%Y-%m-%d %H:%M"),
+                        "取得件数": record_count,
+                        "ステータス": status,
+                    }
                 )
-                status_icon = build_ui_icon(icon_code, tone=tone)
-                st.markdown(
-                    "<div class='status-pill status-pill--{cls}'>{icon}<span>状態: {label}</span></div>".format(
-                        cls=status_level,
-                        icon=status_icon,
-                        label=html.escape(status_label),
-                    ),
-                    unsafe_allow_html=True,
+
+            inventory_status_rows: List[Dict[str, Any]] = []
+            for channel, last_fetch in st.session_state["api_inventory_last_fetched"].items():
+                latest_df = st.session_state["api_inventory_data"].get(channel)
+                record_count = len(latest_df) if isinstance(latest_df, pd.DataFrame) else 0
+                inventory_status_rows.append(
+                    {
+                        "チャネル": channel,
+                        "データ種別": "在庫",
+                        "最終取得": last_fetch.strftime("%Y-%m-%d %H:%M"),
+                        "取得件数": record_count,
+                        "ステータス": "正常",
+                    }
                 )
-                st.markdown(
-                    f"<div class='sidebar-meta'>最終取得: {last_fetch.strftime('%Y-%m-%d %H:%M')} / {record_count:,} 件</div>",
-                    unsafe_allow_html=True,
-                )
+
+            combined_status = sales_status_rows + inventory_status_rows
+            if combined_status:
+                st.dataframe(pd.DataFrame(combined_status))
 
         if st.button("自動取得データをクリア", key="clear_api_sales"):
             st.session_state["api_sales_data"].clear()
             st.session_state["api_sales_validation"].clear()
             st.session_state["api_last_fetched"].clear()
+            st.session_state["api_inventory_data"].clear()
+            st.session_state["api_inventory_last_fetched"].clear()
             st.success("保存されていたAPI取得データをクリアしました。")
 
     finance_controls = st.sidebar.container()
@@ -11058,6 +11519,7 @@ def main() -> None:
 
     automated_sales_data = st.session_state.get("api_sales_data", {})
     automated_reports = list(st.session_state.get("api_sales_validation", {}).values())
+    automated_inventory_data = st.session_state.get("api_inventory_data", {})
 
     try:
         with st.spinner(STATE_MESSAGES["loading"]["text"]):
@@ -11068,6 +11530,7 @@ def main() -> None:
                 subscription_file,
                 automated_sales=automated_sales_data,
                 automated_reports=automated_reports,
+                automated_inventory=automated_inventory_data,
             )
     except Exception as exc:
         logger.exception("Failed to load dashboard data")
@@ -11099,6 +11562,7 @@ def main() -> None:
     sales_df = data_dict["sales"].copy()
     cost_df = data_dict["cost"].copy()
     subscription_df = data_dict["subscription"].copy()
+    inventory_df = data_dict.get("inventory", pd.DataFrame()).copy()
     sales_validation: ValidationReport = data_dict.get("sales_validation", ValidationReport())
 
     if sales_df.empty:
@@ -11162,10 +11626,10 @@ def main() -> None:
         preferred_store = candidate_values[0]
     else:
         preferred_store = store_options[0]
-    default_store = preferred_store
+    default_store_selection = [preferred_store]
 
     default_filters = {
-        FILTER_STATE_KEYS["store"]: default_store,
+        FILTER_STATE_KEYS["store"]: default_store_selection,
         FILTER_STATE_KEYS["channels"]: unique_channels,
         FILTER_STATE_KEYS["categories"]: unique_categories,
         FILTER_STATE_KEYS["period"]: global_default_period,
@@ -11174,15 +11638,27 @@ def main() -> None:
 
     store_state_key = FILTER_STATE_KEYS["store"]
     current_store_state = st.session_state.get(store_state_key)
-    if current_store_state not in store_options:
-        current_store_state = default_store
+    if isinstance(current_store_state, str):
+        current_store_state = [current_store_state]
+    if not current_store_state:
+        current_store_state = list(default_store_selection)
+    else:
+        normalized_store_state = [
+            value for value in current_store_state if value in store_options
+        ]
+        if not normalized_store_state:
+            current_store_state = list(default_store_selection)
+        else:
+            current_store_state = normalized_store_state
     set_state_and_widget(store_state_key, current_store_state)
     store_widget_key = widget_key_for(store_state_key)
-    current_store = st.session_state[store_state_key]
-    store_index = store_options.index(current_store) if current_store in store_options else 0
+    current_store_selection: List[str] = list(st.session_state[store_state_key])
 
-    if current_store and current_store != "全社" and "store" in sales_df.columns:
-        store_sales_df = sales_df[sales_df["store"] == current_store].copy()
+    active_store_filter = [
+        value for value in current_store_selection if value and value != "全社"
+    ]
+    if active_store_filter and "store" in sales_df.columns:
+        store_sales_df = sales_df[sales_df["store"].isin(active_store_filter)].copy()
     else:
         store_sales_df = sales_df.copy()
 
@@ -11278,12 +11754,12 @@ def main() -> None:
         trigger_rerun()
 
     with settings_tab:
-        st.selectbox(
+        st.multiselect(
             "店舗選択",
             options=store_options,
-            index=store_index,
+            default=current_store_selection if store_options else [],
             key=store_widget_key,
-            help="最後に選択した店舗は次回アクセス時も自動で設定されます。",
+            help="複数店舗を選択すると該当店舗のKPIに絞り込まれます。",
             on_change=_apply_filter_form,
             args=(store_state_key,),
         )
@@ -11352,7 +11828,7 @@ def main() -> None:
     selected_granularity_label = st.session_state[freq_state_key]
     selected_freq = freq_lookup[selected_granularity_label]
 
-    selected_store = st.session_state[store_state_key]
+    selected_store: List[str] = list(st.session_state[store_state_key])
     selected_channels = st.session_state[channel_state_key]
     selected_categories = st.session_state[category_state_key]
     date_range = current_period
@@ -11373,8 +11849,9 @@ def main() -> None:
         st.session_state[signature_key] = filter_signature
 
     store_filter: Optional[List[str]] = None
-    if selected_store and selected_store not in ("全社", None):
-        store_filter = [selected_store]
+    active_store_selection = [value for value in selected_store if value != "全社"]
+    if active_store_selection:
+        store_filter = active_store_selection
     if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
         date_range_list = [date_range[0], date_range[1]]
     else:
@@ -11900,7 +12377,9 @@ def main() -> None:
             render_store_comparison_chart(
                 analysis_df,
                 fixed_cost,
-                selected_store=st.session_state.get(FILTER_STATE_KEYS["store"]),
+                selected_store=list(
+                    st.session_state.get(FILTER_STATE_KEYS["store"], [])
+                ),
             )
 
             st.markdown("### ABC分析（売上上位30商品）")
@@ -11927,7 +12406,12 @@ def main() -> None:
                     ].iloc[0]
                 except IndexError:
                     selected_inventory_row = latest_kpi_row
-            render_inventory_tab(merged_df, kpi_period_summary, selected_inventory_row)
+            render_inventory_tab(
+                merged_df,
+                kpi_period_summary,
+                selected_inventory_row,
+                inventory_snapshot=inventory_df,
+            )
 
     elif selected_nav_key == "gross":
         st.subheader("利益分析")
@@ -12665,7 +13149,7 @@ def main() -> None:
                 else:
                     st.info("現在表示できるエラーログはありません。")
 
-        if automated_sales_data:
+        if automated_sales_data or automated_inventory_data:
             status_rows = []
             for channel, df in automated_sales_data.items():
                 last_fetch = st.session_state["api_last_fetched"].get(channel)
@@ -12675,9 +13159,22 @@ def main() -> None:
                     status_rows.append(
                         {
                             "チャネル": channel,
+                            "データ種別": "売上",
                             "最終取得": last_fetch.strftime("%Y-%m-%d %H:%M"),
                             "取得件数": len(df) if isinstance(df, pd.DataFrame) else 0,
                             "ステータス": status,
+                        }
+                    )
+            for channel, df in automated_inventory_data.items():
+                last_fetch = st.session_state["api_inventory_last_fetched"].get(channel)
+                if last_fetch:
+                    status_rows.append(
+                        {
+                            "チャネル": channel,
+                            "データ種別": "在庫",
+                            "最終取得": last_fetch.strftime("%Y-%m-%d %H:%M"),
+                            "取得件数": len(df) if isinstance(df, pd.DataFrame) else 0,
+                            "ステータス": "正常",
                         }
                     )
             if status_rows:
@@ -12695,6 +13192,12 @@ def main() -> None:
                 st.info("原価率データが未設定です。")
             else:
                 st.dataframe(cost_df)
+
+        with st.expander("在庫データのプレビュー (API連携)"):
+            if inventory_df.empty:
+                st.info("APIから取得した在庫データはまだありません。")
+            else:
+                st.dataframe(inventory_df.head(100))
 
         with st.expander("売上データのプレビュー"):
             st.dataframe(merged_full.head(100))
