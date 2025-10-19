@@ -10732,7 +10732,7 @@ def main() -> None:
     with start_tab:
         start_tab.button(
             toggle_label,
-            key="toggle_sidebar_onboarding",
+            key="toggle_sidebar_onboarding_tab",
             use_container_width=True,
             type="primary",
             help="クリックして『はじめに』セクションの表示/非表示を切り替えます。",
