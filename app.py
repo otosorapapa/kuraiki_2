@@ -27,6 +27,9 @@ import streamlit.components.v1 as components
 from streamlit_plotly_events import plotly_events
 
 
+logger = logging.getLogger(__name__)
+
+
 REPORTLAB_AVAILABLE = True
 try:  # pragma: no cover - optional dependency check
     from reportlab.lib import colors
@@ -80,22 +83,80 @@ except ImportError as import_error:
     DATA_PROCESSING_IMPORT_ERROR = import_error
 
 
-st.set_page_config(
-    page_title="経営ダッシュボード",
-    page_icon=":bar_chart:",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    theme={
-        "primaryColor": "#2563EB",
-        "backgroundColor": "#F8FAFC",
-        "secondaryBackgroundColor": "#FFFFFF",
-        "textColor": "#0F172A",
-        "font": "Inter",
-    },
-)
+_PAGE_CONFIG = {
+    "page_title": "経営ダッシュボード",
+    "page_icon": ":bar_chart:",
+    "layout": "wide",
+    "initial_sidebar_state": "expanded",
+}
+
+_THEME_CONFIG = {
+    "primaryColor": "#2563EB",
+    "backgroundColor": "#F8FAFC",
+    "secondaryBackgroundColor": "#FFFFFF",
+    "textColor": "#0F172A",
+    "font": "Inter",
+}
 
 
-logger = logging.getLogger(__name__)
+def _apply_legacy_theme_css(theme: Dict[str, str]) -> None:
+    """Inject CSS to emulate the desired theme on Streamlit versions without native support."""
+
+    primary = theme.get("primaryColor", "#2563EB")
+    background = theme.get("backgroundColor", "#F8FAFC")
+    secondary = theme.get("secondaryBackgroundColor", "#FFFFFF")
+    text_color = theme.get("textColor", "#0F172A")
+    font = theme.get("font", "Inter")
+
+    st.markdown(
+        f"""
+        <style>
+        :root {{
+            --app-primary-color: {primary};
+            --app-text-color: {text_color};
+        }}
+
+        html, body, [data-testid="stAppViewContainer"] > .main {{
+            background-color: {background};
+            color: {text_color};
+            font-family: '{font}', sans-serif;
+        }}
+
+        [data-testid="stSidebar"] > div:first-child {{
+            background-color: {secondary};
+        }}
+
+        .stButton>button, .stDownloadButton>button {{
+            background-color: {primary};
+            color: white;
+            border-radius: 0.5rem;
+            border: none;
+        }}
+
+        .stButton>button:hover, .stDownloadButton>button:hover {{
+            filter: brightness(0.9);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _configure_page() -> None:
+    """Configure the Streamlit page, supporting older versions without theme parameter."""
+
+    try:
+        st.set_page_config(**_PAGE_CONFIG, theme=_THEME_CONFIG)
+    except TypeError as error:
+        logger.warning(
+            "Streamlit theme configuration failed; falling back to CSS override. Error: %s",
+            error,
+        )
+        st.set_page_config(**_PAGE_CONFIG)
+        _apply_legacy_theme_css(_THEME_CONFIG)
+
+
+_configure_page()
 
 
 def _render_data_processing_import_error(error: BaseException) -> None:
